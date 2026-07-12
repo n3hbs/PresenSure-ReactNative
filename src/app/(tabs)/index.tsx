@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -12,6 +13,8 @@ import {
 } from 'react-native';
 import { BleManager, type Device, State } from 'react-native-ble-plx';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { useAuth } from '@/context/auth-context';
 
 const SCAN_DURATION_MS = 10_000;
 
@@ -49,6 +52,7 @@ function signalLabel(rssi: number | null) {
 }
 
 export default function BleScannerScreen() {
+  const { signOut } = useAuth();
   const [manager] = useState(() => new BleManager());
   const [devices, setDevices] = useState<Device[]>([]);
   const [isScanning, setIsScanning] = useState(false);
@@ -127,16 +131,31 @@ export default function BleScannerScreen() {
     }
   }, [isScanning, manager, stopScan]);
 
+  const handleLogout = useCallback(async () => {
+    if (isScanning) stopScan();
+    await signOut();
+    router.replace('/login');
+  }, [isScanning, signOut, stopScan]);
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.header}>
-        <View style={styles.iconBox}>
-          <Ionicons name="bluetooth" size={26} color="#FFFFFF" />
+        <View style={styles.headerLeft}>
+          <View style={styles.iconBox}>
+            <Ionicons name="bluetooth" size={26} color="#FFFFFF" />
+          </View>
+          <View style={styles.headerCopy}>
+            <Text style={styles.eyebrow}>PRESENSURE</Text>
+            <Text style={styles.title}>Nearby devices</Text>
+          </View>
         </View>
-        <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>PRESENSURE</Text>
-          <Text style={styles.title}>Nearby devices</Text>
-        </View>
+        <Pressable
+          accessibilityLabel="Logout"
+          accessibilityRole="button"
+          onPress={handleLogout}
+          style={({ pressed }) => [styles.logoutButton, pressed && styles.buttonPressed]}>
+          <Ionicons name="log-out-outline" size={22} color="#DC2626" />
+        </Pressable>
       </View>
 
       <View style={styles.statusCard}>
@@ -209,10 +228,12 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 18,
   },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   iconBox: {
     width: 48,
     height: 48,
@@ -224,6 +245,17 @@ const styles = StyleSheet.create({
   headerCopy: { marginLeft: 13 },
   eyebrow: { color: '#2563EB', fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
   title: { color: '#0F172A', fontSize: 27, fontWeight: '800', letterSpacing: -0.5 },
+  logoutButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
   statusCard: {
     marginHorizontal: 20,
     padding: 18,
