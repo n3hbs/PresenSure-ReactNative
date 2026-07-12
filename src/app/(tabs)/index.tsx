@@ -1,152 +1,108 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
+  ActivityIndicator,
   FlatList,
-  PermissionsAndroid,
-  Platform,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { BleManager, type Device, State } from 'react-native-ble-plx';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/context/auth-context';
+import { getCourseSchedules } from '@/services/course-schedule-service';
+import type { CourseSchedule } from '@/types/course-schedule';
 
-const SCAN_DURATION_MS = 10_000;
+function getCourseTitle(schedule: CourseSchedule) {
+  return schedule.course_name ?? schedule.course_code ?? 'Course schedule';
+}
 
-async function requestBlePermissions() {
-  if (Platform.OS !== 'android') return true;
+function getCourseCode(schedule: CourseSchedule) {
+  return schedule.course_code ?? 'COURSE';
+}
 
-  if (Platform.Version >= 31) {
-    const result = await PermissionsAndroid.requestMultiple([
-      PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-      PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-    ]);
-
-    return (
-      result[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] ===
-        PermissionsAndroid.RESULTS.GRANTED &&
-      result[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] ===
-        PermissionsAndroid.RESULTS.GRANTED &&
-      result[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
-        PermissionsAndroid.RESULTS.GRANTED
-    );
+function getScheduleDay(schedule: CourseSchedule) {
+  if (Array.isArray(schedule.days)) {
+    return schedule.days.length > 0 ? schedule.days.join(', ') : 'Day not set';
   }
-
-  const result = await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-  );
-  return result === PermissionsAndroid.RESULTS.GRANTED;
+  return schedule.days ?? schedule.day ?? 'Schedule day';
 }
 
-function signalLabel(rssi: number | null) {
-  if (rssi === null) return 'Unknown';
-  if (rssi >= -60) return 'Strong';
-  if (rssi >= -80) return 'Nearby';
-  return 'Weak';
+function getScheduleTime(schedule: CourseSchedule) {
+  if (schedule.start_time && schedule.end_time) {
+    return `${schedule.start_time} - ${schedule.end_time}`;
+  }
+  return schedule.start_time ?? schedule.end_time ?? 'Time not set';
 }
 
-export default function BleScannerScreen() {
-  const { signOut } = useAuth();
-  const [manager] = useState(() => new BleManager());
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [isScanning, setIsScanning] = useState(false);
-  const [status, setStatus] = useState('Ready to scan');
-  const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+export default function HomeScreen() {
+  const { signOut, user } = useAuth();
+  const [schedules, setSchedules] = useState<CourseSchedule[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const userId = user?.user_id;
 
-  const stopScan = useCallback(() => {
-    manager.stopDeviceScan();
-    if (scanTimer.current) {
-      clearTimeout(scanTimer.current);
-      scanTimer.current = null;
-    }
-    setIsScanning(false);
-    setStatus((current) => (current === 'Scanning nearby devices…' ? 'Scan complete' : current));
-  }, [manager]);
+  const displayName = useMemo(() => {
+    if (!user) return 'Student';
+    return [user.first_name, user.middle_initial, user.last_name, user.suffix]
+      .filter(Boolean)
+      .join(' ');
+  }, [user]);
+
+  const loadSchedules = useCallback(async () => {
+    if (!userId) return;
+
+    setError(null);
+    const nextSchedules = await getCourseSchedules(userId);
+    setSchedules(nextSchedules);
+  }, [userId]);
 
   useEffect(() => {
-    return () => {
-      if (scanTimer.current) clearTimeout(scanTimer.current);
-      manager.stopDeviceScan();
-      manager.destroy();
-    };
-  }, [manager]);
+    const timeout = setTimeout(() => {
+      loadSchedules()
+        .catch((loadError) => {
+          const message =
+            loadError instanceof Error ? loadError.message : 'Unable to load course schedules.';
+          setError(message);
+        })
+        .finally(() => setIsLoading(false));
+    }, 0);
 
-  const startScan = useCallback(async () => {
-    if (isScanning) {
-      stopScan();
-      return;
-    }
+    return () => clearTimeout(timeout);
+  }, [loadSchedules]);
 
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
     try {
-      const hasPermission = await requestBlePermissions();
-      if (!hasPermission) {
-        setStatus('Bluetooth permission denied');
-        Alert.alert(
-          'Permission needed',
-          'Allow Nearby devices access so PresenSure can discover BLE devices.',
-        );
-        return;
-      }
-
-      const bluetoothState = await manager.state();
-      if (bluetoothState !== State.PoweredOn) {
-        setStatus('Bluetooth is turned off');
-        Alert.alert('Bluetooth is off', 'Turn on Bluetooth, then try scanning again.');
-        return;
-      }
-
-      setDevices([]);
-      setIsScanning(true);
-      setStatus('Scanning nearby devices…');
-
-      manager.startDeviceScan(null, null, (error, device) => {
-        if (error) {
-          stopScan();
-          setStatus(error.message);
-          Alert.alert('Scan failed', error.message);
-          return;
-        }
-
-        if (!device) return;
-
-        setDevices((current) => {
-          const next = new Map(current.map((item) => [item.id, item]));
-          next.set(device.id, device);
-          return [...next.values()].sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999));
-        });
-      });
-
-      scanTimer.current = setTimeout(stopScan, SCAN_DURATION_MS);
-    } catch (error) {
-      stopScan();
-      const message = error instanceof Error ? error.message : 'Unable to start BLE scan.';
-      setStatus(message);
-      Alert.alert('Bluetooth error', message);
+      await loadSchedules();
+    } catch (refreshError) {
+      const message =
+        refreshError instanceof Error ? refreshError.message : 'Unable to refresh schedules.';
+      setError(message);
+    } finally {
+      setIsRefreshing(false);
     }
-  }, [isScanning, manager, stopScan]);
+  }, [loadSchedules]);
 
   const handleLogout = useCallback(async () => {
-    if (isScanning) stopScan();
     await signOut();
     router.replace('/login');
-  }, [isScanning, signOut, stopScan]);
+  }, [signOut]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.iconBox}>
-            <Ionicons name="bluetooth" size={26} color="#FFFFFF" />
+            <Ionicons name="home" size={25} color="#FFFFFF" />
           </View>
           <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>PRESENSURE</Text>
-            <Text style={styles.title}>Nearby devices</Text>
+            <Text style={styles.title}>Home</Text>
           </View>
         </View>
         <Pressable
@@ -158,67 +114,107 @@ export default function BleScannerScreen() {
         </Pressable>
       </View>
 
-      <View style={styles.statusCard}>
-        <View>
-          <Text style={styles.statusLabel}>BLE SCANNER</Text>
-          <Text style={styles.statusText}>{status}</Text>
+      <View style={styles.hero}>
+        <Text style={styles.welcomeLabel}>WELCOME BACK</Text>
+        <Text style={styles.welcomeName} numberOfLines={2}>
+          {displayName}
+        </Text>
+        <View style={styles.metaRow}>
+          <View style={styles.metaPill}>
+            <Ionicons name="id-card-outline" size={16} color="#1D4ED8" />
+            <Text style={styles.metaText}>{user?.user_id}</Text>
+          </View>
+          <View style={styles.metaPill}>
+            <Ionicons name="person-circle-outline" size={16} color="#1D4ED8" />
+            <Text style={styles.metaText}>{user?.role.role_name ?? 'student'}</Text>
+          </View>
         </View>
-        <View style={[styles.statusDot, isScanning && styles.statusDotActive]} />
       </View>
 
-      <Pressable
-        accessibilityRole="button"
-        onPress={startScan}
-        style={({ pressed }) => [
-          styles.scanButton,
-          isScanning && styles.stopButton,
-          pressed && styles.buttonPressed,
-        ]}>
-        <Ionicons name={isScanning ? 'stop' : 'scan'} size={20} color="#FFFFFF" />
-        <Text style={styles.scanButtonText}>{isScanning ? 'Stop scanning' : 'Scan for devices'}</Text>
-      </Pressable>
-
-      <View style={styles.listHeader}>
-        <Text style={styles.listTitle}>Devices in range</Text>
-        <Text style={styles.deviceCount}>{devices.length}</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Course schedule</Text>
+        <Pressable
+          accessibilityLabel="Refresh schedules"
+          accessibilityRole="button"
+          onPress={handleRefresh}
+          style={({ pressed }) => [styles.refreshButton, pressed && styles.buttonPressed]}>
+          <Ionicons name="refresh" size={18} color="#2563EB" />
+        </Pressable>
       </View>
 
-      <FlatList
-        data={devices}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={devices.length === 0 ? styles.emptyList : styles.deviceList}
-        renderItem={({ item }) => (
-          <View style={styles.deviceCard}>
-            <View style={styles.deviceIcon}>
-              <Ionicons name="hardware-chip-outline" size={22} color="#2563EB" />
+      {isLoading ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator color="#2563EB" />
+          <Text style={styles.centerText}>Loading schedules</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={schedules}
+          keyExtractor={(item, index) => String(item.id ?? item.course_id ?? index)}
+          contentContainerStyle={schedules.length === 0 ? styles.emptyList : styles.scheduleList}
+          refreshControl={
+            <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#2563EB" />
+          }
+          renderItem={({ item }) => (
+            <View style={styles.scheduleCard}>
+              <View style={styles.scheduleTop}>
+                <Text style={styles.courseTitle} numberOfLines={2}>
+                  {getCourseTitle(item)}
+                </Text>
+                <View style={styles.courseCodePill}>
+                  <Text style={styles.courseCodeText} numberOfLines={1}>
+                    {getCourseCode(item)}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.scheduleMeta}>
+                <View style={styles.metaChip}>
+                  <Ionicons name="calendar-outline" size={16} color="#64748B" />
+                  <Text style={styles.metaChipText} numberOfLines={1}>
+                    {getScheduleDay(item)}
+                  </Text>
+                </View>
+                <View style={styles.metaChip}>
+                  <Ionicons name="time-outline" size={16} color="#64748B" />
+                  <Text style={styles.metaChipText} numberOfLines={1}>
+                    {getScheduleTime(item)}
+                  </Text>
+                </View>
+                <View style={styles.metaChip}>
+                  <Ionicons name="location-outline" size={16} color="#64748B" />
+                  <Text style={styles.metaChipText} numberOfLines={1}>
+                    {item.room ?? 'Room not set'}
+                  </Text>
+                </View>
+                <View style={styles.metaChip}>
+                  <Ionicons name="layers-outline" size={16} color="#64748B" />
+                  <Text style={styles.metaChipText} numberOfLines={1}>
+                    {[item.section, item.semester].filter(Boolean).join(' - ') || 'Block not set'}
+                  </Text>
+                </View>
+              </View>
             </View>
-            <View style={styles.deviceDetails}>
-              <Text style={styles.deviceName} numberOfLines={1}>
-                {item.name ?? item.localName ?? 'Unnamed BLE device'}
+          )}
+          ListEmptyComponent={
+            <View style={styles.centerState}>
+              <View style={styles.emptyIcon}>
+                <Ionicons
+                  name={error ? 'alert-circle-outline' : 'calendar-clear-outline'}
+                  size={34}
+                  color={error ? '#DC2626' : '#64748B'}
+                />
+              </View>
+              <Text style={styles.emptyTitle}>
+                {error ? 'Could not load schedules' : 'No schedules yet'}
               </Text>
-              <Text style={styles.deviceId} numberOfLines={1}>
-                {item.id}
+              <Text style={styles.emptyText}>
+                {error ?? 'Your course schedules will appear here once available.'}
               </Text>
             </View>
-            <View style={styles.signal}>
-              <Ionicons name="cellular" size={17} color="#64748B" />
-              <Text style={styles.signalText}>{signalLabel(item.rssi)}</Text>
-              <Text style={styles.rssi}>{item.rssi === null ? '—' : `${item.rssi} dBm`}</Text>
-            </View>
-          </View>
-        )}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="radio-outline" size={34} color="#64748B" />
-            </View>
-            <Text style={styles.emptyTitle}>No devices found yet</Text>
-            <Text style={styles.emptyText}>
-              Make sure your BLE device is powered on and advertising, then start a scan.
-            </Text>
-          </View>
-        }
-      />
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -229,26 +225,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 18,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 12,
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   iconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 15,
+    width: 44,
+    height: 44,
+    borderRadius: 13,
     backgroundColor: '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerCopy: { marginLeft: 13 },
   eyebrow: { color: '#2563EB', fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
-  title: { color: '#0F172A', fontSize: 27, fontWeight: '800', letterSpacing: -0.5 },
+  title: { color: '#0F172A', fontSize: 25, fontWeight: '800' },
   logoutButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 42,
+    height: 42,
+    borderRadius: 13,
     backgroundColor: '#FEF2F2',
     borderWidth: 1,
     borderColor: '#FECACA',
@@ -256,81 +252,88 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 12,
   },
-  statusCard: {
-    marginHorizontal: 20,
-    padding: 18,
-    borderRadius: 18,
+  hero: {
+    marginHorizontal: 14,
+    padding: 14,
+    borderRadius: 14,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2E8F0',
+  },
+  welcomeLabel: { color: '#64748B', fontSize: 11, fontWeight: '900', letterSpacing: 1.2 },
+  welcomeName: { color: '#0F172A', fontSize: 23, fontWeight: '900', marginTop: 5 },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 10 },
+  metaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  metaText: { color: '#1D4ED8', fontSize: 12, fontWeight: '800', textTransform: 'capitalize' },
+  sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    marginTop: 16,
+    marginBottom: 8,
   },
-  statusLabel: { color: '#64748B', fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
-  statusText: { color: '#0F172A', fontSize: 16, fontWeight: '700', marginTop: 5 },
-  statusDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#CBD5E1' },
-  statusDotActive: { backgroundColor: '#22C55E' },
-  scanButton: {
-    margin: 20,
-    minHeight: 54,
-    borderRadius: 16,
-    backgroundColor: '#2563EB',
-    flexDirection: 'row',
+  sectionTitle: { color: '#0F172A', fontSize: 18, fontWeight: '900' },
+  refreshButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 9,
+    backgroundColor: '#DBEAFE',
   },
-  stopButton: { backgroundColor: '#DC2626' },
-  buttonPressed: { opacity: 0.82 },
-  scanButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
-  listHeader: {
+  scheduleList: { paddingHorizontal: 14, paddingBottom: 110, gap: 10 },
+  scheduleCard: {
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 12,
+  },
+  scheduleTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 10,
+    gap: 10,
   },
-  listTitle: { color: '#0F172A', fontSize: 18, fontWeight: '800' },
-  deviceCount: {
-    marginLeft: 9,
-    minWidth: 25,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 12,
-    overflow: 'hidden',
-    textAlign: 'center',
-    backgroundColor: '#DBEAFE',
-    color: '#1D4ED8',
-    fontSize: 12,
-    fontWeight: '800',
+  courseTitle: { flex: 1, color: '#0F172A', fontSize: 16, fontWeight: '900', lineHeight: 21 },
+  courseCodePill: {
+    maxWidth: 104,
+    minHeight: 30,
+    borderRadius: 10,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 9,
   },
-  deviceList: { paddingHorizontal: 20, paddingBottom: 110, gap: 10 },
-  deviceCard: {
-    minHeight: 82,
-    padding: 14,
-    borderRadius: 17,
-    backgroundColor: '#FFFFFF',
+  courseCodeText: { color: '#15803D', fontSize: 11, fontWeight: '900' },
+  scheduleMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 11 },
+  metaChip: {
+    flexBasis: '48%',
+    flexGrow: 1,
+    minHeight: 34,
+    borderRadius: 10,
+    backgroundColor: '#F8FAFC',
     borderWidth: 1,
     borderColor: '#E2E8F0',
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 9,
   },
-  deviceIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: '#EFF6FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deviceDetails: { flex: 1, marginHorizontal: 12 },
-  deviceName: { color: '#0F172A', fontSize: 15, fontWeight: '800' },
-  deviceId: { color: '#94A3B8', fontSize: 11, marginTop: 5 },
-  signal: { alignItems: 'flex-end' },
-  signalText: { color: '#475569', fontSize: 11, fontWeight: '700', marginTop: 3 },
-  rssi: { color: '#94A3B8', fontSize: 10, marginTop: 2 },
-  emptyList: { flexGrow: 1, paddingHorizontal: 32, paddingBottom: 90 },
-  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  metaChipText: { flex: 1, color: '#475569', fontSize: 12, fontWeight: '800' },
+  centerState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
+  centerText: { color: '#64748B', fontSize: 13, fontWeight: '700', marginTop: 10 },
+  emptyList: { flexGrow: 1, paddingHorizontal: 28, paddingBottom: 110 },
   emptyIcon: {
     width: 72,
     height: 72,
@@ -339,13 +342,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emptyTitle: { color: '#0F172A', fontSize: 17, fontWeight: '800', marginTop: 16 },
+  emptyTitle: { color: '#0F172A', fontSize: 17, fontWeight: '900', marginTop: 16 },
   emptyText: {
     color: '#64748B',
     fontSize: 14,
     lineHeight: 21,
     textAlign: 'center',
     marginTop: 7,
-    maxWidth: 300,
   },
+  buttonPressed: { opacity: 0.78 },
 });

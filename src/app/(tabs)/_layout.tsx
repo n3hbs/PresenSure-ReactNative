@@ -37,7 +37,16 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'BLE Scanner',
+          title: 'Home',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home-outline" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="scanner"
+        options={{
+          title: 'Scanner',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="bluetooth" color={color} size={size} />
           ),
