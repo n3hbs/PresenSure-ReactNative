@@ -4,6 +4,8 @@ import { ActivityIndicator, View } from 'react-native';
 
 import { useAuth } from '@/context/auth-context';
 
+const TAB_SIDE_MARGIN = 16;
+
 export default function TabsLayout() {
   const { isAuthenticated, isLoadingSession } = useAuth();
 
@@ -23,14 +25,25 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        animation: 'shift',
         tabBarActiveTintColor: '#2563EB',
         tabBarInactiveTintColor: '#64748B',
         tabBarStyle: {
-          height: 68,
+          position: 'absolute',
+          left: TAB_SIDE_MARGIN,
+          right: TAB_SIDE_MARGIN,
+          bottom: 18,
+          height: 70,
+          borderRadius: 999,
           paddingTop: 7,
-          paddingBottom: 9,
-          borderTopColor: '#E2E8F0',
+          paddingBottom: 8,
+          borderTopWidth: 0,
           backgroundColor: '#FFFFFF',
+          shadowColor: '#0F172A',
+          shadowOpacity: 0.16,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 8 },
+          elevation: 10,
         },
         tabBarLabelStyle: { fontSize: 12, fontWeight: '700' },
       }}>

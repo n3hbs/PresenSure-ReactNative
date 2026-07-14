@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Pressable,
   RefreshControl,
-  StyleSheet,
   Text,
   View,
 } from 'react-native';
@@ -16,31 +16,220 @@ import { useAuth } from '@/context/auth-context';
 import { getCourseSchedules } from '@/services/course-schedule-service';
 import type { CourseSchedule } from '@/types/course-schedule';
 
+type ScheduleTab = 'today' | 'all';
+
+const MANILA_TIME_ZONE = 'Asia/Manila';
+
+const DAY_DATE_INDEX: Record<string, number> = {
+  monday: 1,
+  mon: 1,
+  m: 1,
+  tuesday: 2,
+  tue: 2,
+  t: 2,
+  wednesday: 3,
+  wed: 3,
+  w: 3,
+  thursday: 4,
+  thu: 4,
+  th: 4,
+  friday: 5,
+  fri: 5,
+  f: 5,
+  saturday: 6,
+  sat: 6,
+  s: 6,
+  sunday: 0,
+  sun: 0,
+  su: 0,
+};
+
+const DAY_SEQUENCE: Record<string, number> = {
+  monday: 1,
+  mon: 1,
+  m: 1,
+  tuesday: 2,
+  tue: 2,
+  t: 2,
+  wednesday: 3,
+  wed: 3,
+  w: 3,
+  thursday: 4,
+  thu: 4,
+  th: 4,
+  friday: 5,
+  fri: 5,
+  f: 5,
+  saturday: 6,
+  sat: 6,
+  s: 6,
+  sunday: 7,
+  sun: 7,
+  su: 7,
+};
+
+const DAY_LABELS: Record<string, string> = {
+  monday: 'Mon',
+  mon: 'Mon',
+  m: 'Mon',
+  tuesday: 'Tue',
+  tue: 'Tue',
+  t: 'Tue',
+  wednesday: 'Wed',
+  wed: 'Wed',
+  w: 'Wed',
+  thursday: 'Thu',
+  thu: 'Thu',
+  th: 'Thu',
+  friday: 'Fri',
+  fri: 'Fri',
+  f: 'Fri',
+  saturday: 'Sat',
+  sat: 'Sat',
+  s: 'Sat',
+  sunday: 'Sun',
+  sun: 'Sun',
+  su: 'Sun',
+};
+
+function getDayLabel(day: string) {
+  const normalized = day.trim().toLowerCase();
+  return DAY_LABELS[normalized] ?? normalized.slice(0, 3).replace(/^\w/, (value) => value.toUpperCase());
+}
+
+function getDaySequence(day: string) {
+  return DAY_SEQUENCE[day.trim().toLowerCase()] ?? Number.MAX_SAFE_INTEGER;
+}
+
+function formatScheduleType(type?: string | null) {
+  if (!type) return 'Regular';
+  return type.replace(/[_-]+/g, ' ').replace(/\b\w/g, (value) => value.toUpperCase());
+}
+
 function getCourseTitle(schedule: CourseSchedule) {
-  return schedule.course_name ?? schedule.course_code ?? 'Course schedule';
+  return schedule.course_name ?? schedule.course_code ?? 'No Subject';
 }
 
-function getCourseCode(schedule: CourseSchedule) {
-  return schedule.course_code ?? 'COURSE';
+function getDaysText(schedule: CourseSchedule) {
+  const dayCodes = getSortedDayCodes(schedule.days ?? schedule.day);
+
+  return dayCodes.length > 0 ? dayCodes.map(getDayLabel).join(' | ') : 'No days';
 }
 
-function getScheduleDay(schedule: CourseSchedule) {
-  if (Array.isArray(schedule.days)) {
-    return schedule.days.length > 0 ? schedule.days.join(', ') : 'Day not set';
+function getDayCodes(days?: string[] | string) {
+  if (Array.isArray(days)) return days;
+  if (!days) return [];
+
+  const trimmedDays = days.trim();
+  if (!trimmedDays) return [];
+  if (DAY_DATE_INDEX[trimmedDays.toLowerCase()] !== undefined || DAY_LABELS[trimmedDays.toLowerCase()]) {
+    return [trimmedDays];
   }
-  return schedule.days ?? schedule.day ?? 'Schedule day';
+  if (/[\s,]+/.test(trimmedDays)) {
+    return trimmedDays.split(/[\s,]+/).filter(Boolean);
+  }
+
+  const codes: string[] = [];
+  let index = 0;
+
+  while (index < trimmedDays.length) {
+    const twoLetters = trimmedDays.substring(index, index + 2);
+    const twoLettersLower = twoLetters.toLowerCase();
+    if (twoLettersLower === 'th' || twoLettersLower === 'su') {
+      codes.push(twoLetters);
+      index += 2;
+    } else {
+      codes.push(trimmedDays[index]);
+      index += 1;
+    }
+  }
+
+  return codes.filter(Boolean);
 }
 
-function getScheduleTime(schedule: CourseSchedule) {
-  if (schedule.start_time && schedule.end_time) {
-    return `${schedule.start_time} - ${schedule.end_time}`;
-  }
-  return schedule.start_time ?? schedule.end_time ?? 'Time not set';
+function getSortedDayCodes(days?: string[] | string) {
+  return getDayCodes(days).sort((first, second) => getDaySequence(first) - getDaySequence(second));
+}
+
+function parseTimeToMinutes(time?: string) {
+  if (!time) return Number.MAX_SAFE_INTEGER;
+  const [hours = '0', minutes = '0'] = time.split(':');
+  return Number(hours) * 60 + Number(minutes);
+}
+
+function getManilaNow() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    hourCycle: 'h23',
+    minute: '2-digit',
+    timeZone: MANILA_TIME_ZONE,
+    weekday: 'long',
+  }).formatToParts(new Date());
+
+  const weekday = parts.find((part) => part.type === 'weekday')?.value.toLowerCase() ?? 'monday';
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? '0');
+
+  return {
+    dayIndex: DAY_DATE_INDEX[weekday] ?? 1,
+    minutes: hour * 60 + minute,
+  };
+}
+
+function formatTime(time?: string) {
+  if (!time) return 'Not set';
+  const [hourValue, minuteValue = '00'] = time.split(':');
+  const hour = Number(hourValue);
+  if (Number.isNaN(hour)) return time;
+
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}:${minuteValue.padStart(2, '0')} ${period}`;
+}
+
+type ManilaNow = ReturnType<typeof getManilaNow>;
+
+function isScheduleToday(schedule: CourseSchedule, manilaNow = getManilaNow()) {
+  const codes = getDayCodes(schedule.days ?? schedule.day);
+  if (codes.length === 0) return true;
+
+  const currentDay = manilaNow.dayIndex;
+  return codes.some((code) => DAY_DATE_INDEX[code.trim().toLowerCase()] === currentDay);
+}
+
+function isScheduleActive(schedule: CourseSchedule, manilaNow = getManilaNow()) {
+  if (!isScheduleToday(schedule, manilaNow)) return false;
+
+  const currentMinutes = manilaNow.minutes;
+  const start = parseTimeToMinutes(schedule.start_time);
+  const end = parseTimeToMinutes(schedule.end_time);
+
+  return currentMinutes >= start && currentMinutes <= end;
+}
+
+function isScheduleUpcomingOrActiveToday(schedule: CourseSchedule, manilaNow: ManilaNow) {
+  if (!isScheduleToday(schedule, manilaNow)) return false;
+
+  const end = parseTimeToMinutes(schedule.end_time);
+  return end >= manilaNow.minutes;
+}
+
+function getScheduleSortDay(schedule: CourseSchedule) {
+  const dayCodes = getSortedDayCodes(schedule.days ?? schedule.day);
+  return dayCodes.length > 0 ? getDaySequence(dayCodes[0]) : Number.MAX_SAFE_INTEGER;
+}
+
+function openScheduleDetail(schedule: CourseSchedule) {
+  router.push({
+    pathname: '/schedule-detail',
+    params: { schedule: JSON.stringify(schedule) },
+  });
 }
 
 export default function HomeScreen() {
-  const { signOut, user } = useAuth();
+  const { user } = useAuth();
   const [schedules, setSchedules] = useState<CourseSchedule[]>([]);
+  const [activeTab, setActiveTab] = useState<ScheduleTab>('today');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +241,41 @@ export default function HomeScreen() {
       .filter(Boolean)
       .join(' ');
   }, [user]);
+
+  const profileImageUri =
+    user?.profile?.imagelink ??
+    user?.image ??
+    user?.avatar ??
+    user?.profile_photo ??
+    user?.profile_image;
+  const initials = useMemo(() => {
+    if (!user) return 'S';
+    return `${user.first_name?.[0] ?? ''}${user.last_name?.[0] ?? ''}`.toUpperCase() || 'S';
+  }, [user]);
+
+  const filteredSchedules = useMemo(() => {
+    const manilaNow = getManilaNow();
+    const nextSchedules =
+      activeTab === 'today'
+        ? schedules.filter((schedule) => isScheduleUpcomingOrActiveToday(schedule, manilaNow))
+        : schedules;
+
+    return [...nextSchedules].sort((first, second) => {
+      if (activeTab === 'today') {
+        const firstActive = isScheduleActive(first, manilaNow);
+        const secondActive = isScheduleActive(second, manilaNow);
+        if (firstActive !== secondActive) return firstActive ? -1 : 1;
+      }
+
+      const dayDifference = getScheduleSortDay(first) - getScheduleSortDay(second);
+      if (dayDifference !== 0) return dayDifference;
+
+      const timeDifference = parseTimeToMinutes(first.start_time) - parseTimeToMinutes(second.start_time);
+      if (timeDifference !== 0) return timeDifference;
+
+      return getCourseTitle(first).localeCompare(getCourseTitle(second));
+    });
+  }, [activeTab, schedules]);
 
   const loadSchedules = useCallback(async () => {
     if (!userId) return;
@@ -88,128 +312,143 @@ export default function HomeScreen() {
     }
   }, [loadSchedules]);
 
-  const handleLogout = useCallback(async () => {
-    await signOut();
-    router.replace('/login');
-  }, [signOut]);
-
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.iconBox}>
-            <Ionicons name="home" size={25} color="#FFFFFF" />
+    <SafeAreaView className="flex-1 bg-slate-100" edges={['top']}>
+      <View className="flex-row items-center justify-between px-4 pb-3 pt-2">
+        <View className="flex-1 flex-row items-center">
+          <View className="h-11 w-11 items-center justify-center rounded-[13px] bg-blue-600">
+            <Ionicons name="home" size={24} color="#FFFFFF" />
           </View>
-          <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>PRESENSURE</Text>
-            <Text style={styles.title}>Home</Text>
+          <View className="ml-3">
+            <Text className="text-[11px] font-black tracking-[1.4px] text-blue-600">PRESENSURE</Text>
+            <Text className="text-2xl font-black text-slate-950">Home</Text>
           </View>
         </View>
         <Pressable
-          accessibilityLabel="Logout"
+          accessibilityLabel="Open profile"
           accessibilityRole="button"
-          onPress={handleLogout}
-          style={({ pressed }) => [styles.logoutButton, pressed && styles.buttonPressed]}>
-          <Ionicons name="log-out-outline" size={22} color="#DC2626" />
+          onPress={() => router.push('/profile')}
+          className="h-[42px] w-[42px] items-center justify-center overflow-hidden rounded-full border-2 border-blue-200 bg-white"
+          style={({ pressed }) => pressed && { opacity: 0.78 }}>
+          {profileImageUri ? (
+            <Image source={{ uri: profileImageUri }} className="h-full w-full" />
+          ) : (
+            <Text className="text-sm font-black text-blue-600">{initials}</Text>
+          )}
         </Pressable>
       </View>
 
-      <View style={styles.hero}>
-        <Text style={styles.welcomeLabel}>WELCOME BACK</Text>
-        <Text style={styles.welcomeName} numberOfLines={2}>
+      <View className="px-4 pb-3.5">
+        <Text className="text-[13px] font-extrabold text-slate-500">Welcome back</Text>
+        <Text className="mt-0.5 text-xl font-black text-slate-950" numberOfLines={1}>
           {displayName}
         </Text>
-        <View style={styles.metaRow}>
-          <View style={styles.metaPill}>
-            <Ionicons name="id-card-outline" size={16} color="#1D4ED8" />
-            <Text style={styles.metaText}>{user?.user_id}</Text>
-          </View>
-          <View style={styles.metaPill}>
-            <Ionicons name="person-circle-outline" size={16} color="#1D4ED8" />
-            <Text style={styles.metaText}>{user?.role.role_name ?? 'student'}</Text>
-          </View>
-        </View>
       </View>
 
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Course schedule</Text>
+      <View className="mx-4 mb-[18px] flex-row rounded-full bg-slate-200 p-1.5">
         <Pressable
-          accessibilityLabel="Refresh schedules"
           accessibilityRole="button"
-          onPress={handleRefresh}
-          style={({ pressed }) => [styles.refreshButton, pressed && styles.buttonPressed]}>
-          <Ionicons name="refresh" size={18} color="#2563EB" />
+          onPress={() => setActiveTab('today')}
+          className={`min-h-[38px] flex-1 items-center justify-center rounded-full ${
+            activeTab === 'today' ? 'bg-white' : ''
+          }`}>
+          <Text
+            className={`text-[13px] font-extrabold ${
+              activeTab === 'today' ? 'text-slate-700' : 'text-slate-500'
+            }`}>
+            Today Schedule
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setActiveTab('all')}
+          className={`min-h-[38px] flex-1 items-center justify-center rounded-full ${
+            activeTab === 'all' ? 'bg-white' : ''
+          }`}>
+          <Text
+            className={`text-[13px] font-extrabold ${
+              activeTab === 'all' ? 'text-slate-700' : 'text-slate-500'
+            }`}>
+            All Schedule
+          </Text>
         </Pressable>
       </View>
 
       {isLoading ? (
-        <View style={styles.centerState}>
+        <View className="flex-1 items-center justify-center px-7">
           <ActivityIndicator color="#2563EB" />
-          <Text style={styles.centerText}>Loading schedules</Text>
+          <Text className="mt-2.5 text-[13px] font-bold text-slate-500">Loading schedules</Text>
         </View>
       ) : (
         <FlatList
-          data={schedules}
+          data={filteredSchedules}
           keyExtractor={(item, index) => String(item.id ?? item.course_id ?? index)}
-          contentContainerStyle={schedules.length === 0 ? styles.emptyList : styles.scheduleList}
+          contentContainerStyle={
+            filteredSchedules.length === 0
+              ? { flexGrow: 1, paddingHorizontal: 28, paddingBottom: 128 }
+              : { paddingHorizontal: 16, paddingBottom: 128 }
+          }
+          ItemSeparatorComponent={() => <View className="h-4" />}
           refreshControl={
             <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#2563EB" />
           }
-          renderItem={({ item }) => (
-            <View style={styles.scheduleCard}>
-              <View style={styles.scheduleTop}>
-                <Text style={styles.courseTitle} numberOfLines={2}>
-                  {getCourseTitle(item)}
-                </Text>
-                <View style={styles.courseCodePill}>
-                  <Text style={styles.courseCodeText} numberOfLines={1}>
-                    {getCourseCode(item)}
-                  </Text>
-                </View>
-              </View>
+          renderItem={({ item }) => {
+            const active = isScheduleActive(item);
 
-              <View style={styles.scheduleMeta}>
-                <View style={styles.metaChip}>
-                  <Ionicons name="calendar-outline" size={16} color="#64748B" />
-                  <Text style={styles.metaChipText} numberOfLines={1}>
-                    {getScheduleDay(item)}
+            return (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => openScheduleDetail(item)}
+                className={`min-h-[140px] justify-between rounded-[18px] border bg-white p-[18px] shadow-lg shadow-slate-900/10 ${
+                  active ? 'border-[3px] border-emerald-400' : 'border-gray-200'
+                }`}
+                style={({ pressed }) => pressed && { opacity: 0.84, transform: [{ scale: 0.995 }] }}>
+                <View className="mb-2 flex-row items-center">
+                  <View className="mr-2.5 h-9 w-9 items-center justify-center rounded-full bg-blue-100">
+                    <Ionicons name="book" size={19} color="#2563EB" />
+                  </View>
+                  <Text className="flex-1 text-lg font-black leading-[23px] text-gray-900" numberOfLines={2}>
+                    {getCourseTitle(item)}
                   </Text>
                 </View>
-                <View style={styles.metaChip}>
-                  <Ionicons name="time-outline" size={16} color="#64748B" />
-                  <Text style={styles.metaChipText} numberOfLines={1}>
-                    {getScheduleTime(item)}
+
+                <Text className="mb-3.5 text-sm font-bold text-slate-500" numberOfLines={1}>
+                  {getDaysText(item)} | {item.room ?? 'No room'} | {formatScheduleType(item.schedule_type)}
+                </Text>
+
+                <View className="flex-row items-center justify-between gap-2.5">
+                  <Text className="flex-1 text-base font-black text-blue-600">
+                    {formatTime(item.start_time)} - {formatTime(item.end_time)}
                   </Text>
+                  <View className={`rounded-full px-3 py-1.5 ${active ? 'bg-emerald-100' : 'bg-blue-50'}`}>
+                    <Text
+                      className={`text-[11px] font-black uppercase ${
+                        active ? 'text-emerald-700' : 'text-blue-600'
+                      }`}>
+                      {active ? 'Active' : formatScheduleType(item.schedule_type)}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.metaChip}>
-                  <Ionicons name="location-outline" size={16} color="#64748B" />
-                  <Text style={styles.metaChipText} numberOfLines={1}>
-                    {item.room ?? 'Room not set'}
-                  </Text>
-                </View>
-                <View style={styles.metaChip}>
-                  <Ionicons name="layers-outline" size={16} color="#64748B" />
-                  <Text style={styles.metaChipText} numberOfLines={1}>
-                    {[item.section, item.semester].filter(Boolean).join(' - ') || 'Block not set'}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          )}
+              </Pressable>
+            );
+          }}
           ListEmptyComponent={
-            <View style={styles.centerState}>
-              <View style={styles.emptyIcon}>
+            <View className="flex-1 items-center justify-center px-7">
+              <View className="h-[72px] w-[72px] items-center justify-center rounded-3xl bg-slate-200">
                 <Ionicons
                   name={error ? 'alert-circle-outline' : 'calendar-clear-outline'}
                   size={34}
                   color={error ? '#DC2626' : '#64748B'}
                 />
               </View>
-              <Text style={styles.emptyTitle}>
-                {error ? 'Could not load schedules' : 'No schedules yet'}
+              <Text className="mt-4 text-[17px] font-black text-slate-950">
+                {error ? 'Could not load schedules' : 'No upcoming schedules'}
               </Text>
-              <Text style={styles.emptyText}>
-                {error ?? 'Your course schedules will appear here once available.'}
+              <Text className="mt-[7px] text-center text-sm leading-[21px] text-slate-500">
+                {error ??
+                  (activeTab === 'today'
+                    ? 'You have no more classes for today.'
+                    : 'No schedules available.')}
               </Text>
             </View>
           }
@@ -218,137 +457,3 @@ export default function HomeScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    paddingBottom: 12,
-  },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  iconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 13,
-    backgroundColor: '#2563EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCopy: { marginLeft: 13 },
-  eyebrow: { color: '#2563EB', fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
-  title: { color: '#0F172A', fontSize: 25, fontWeight: '800' },
-  logoutButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 12,
-  },
-  hero: {
-    marginHorizontal: 14,
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  welcomeLabel: { color: '#64748B', fontSize: 11, fontWeight: '900', letterSpacing: 1.2 },
-  welcomeName: { color: '#0F172A', fontSize: 23, fontWeight: '900', marginTop: 5 },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 10 },
-  metaPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    backgroundColor: '#EFF6FF',
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-  },
-  metaText: { color: '#1D4ED8', fontSize: 12, fontWeight: '800', textTransform: 'capitalize' },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  sectionTitle: { color: '#0F172A', fontSize: 18, fontWeight: '900' },
-  refreshButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#DBEAFE',
-  },
-  scheduleList: { paddingHorizontal: 14, paddingBottom: 110, gap: 10 },
-  scheduleCard: {
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: 12,
-  },
-  scheduleTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  courseTitle: { flex: 1, color: '#0F172A', fontSize: 16, fontWeight: '900', lineHeight: 21 },
-  courseCodePill: {
-    maxWidth: 104,
-    minHeight: 30,
-    borderRadius: 10,
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 9,
-  },
-  courseCodeText: { color: '#15803D', fontSize: 11, fontWeight: '900' },
-  scheduleMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 11 },
-  metaChip: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    minHeight: 34,
-    borderRadius: 10,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 9,
-  },
-  metaChipText: { flex: 1, color: '#475569', fontSize: 12, fontWeight: '800' },
-  centerState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
-  centerText: { color: '#64748B', fontSize: 13, fontWeight: '700', marginTop: 10 },
-  emptyList: { flexGrow: 1, paddingHorizontal: 28, paddingBottom: 110 },
-  emptyIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 24,
-    backgroundColor: '#E2E8F0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTitle: { color: '#0F172A', fontSize: 17, fontWeight: '900', marginTop: 16 },
-  emptyText: {
-    color: '#64748B',
-    fontSize: 14,
-    lineHeight: 21,
-    textAlign: 'center',
-    marginTop: 7,
-  },
-  buttonPressed: { opacity: 0.78 },
-});

@@ -1,6 +1,6 @@
 export type ApiCourseScheduleItem = {
-  user_course_block_id: number;
-  assigned_at: string;
+  user_course_block_id?: number;
+  assigned_at?: string;
   course_block: {
     course_block_id: number;
     block_code: string;
@@ -9,7 +9,7 @@ export type ApiCourseScheduleItem = {
       subject_code: string;
       name: string;
     };
-    semester: {
+    semester?: {
       semester_id: number;
       term: string;
       semester_start: string;
@@ -18,6 +18,7 @@ export type ApiCourseScheduleItem = {
     schedules: {
       schedule_id: number;
       block_code: string;
+      schedule_type?: string | null;
       start_time: string;
       end_time: string;
       days: string[] | string;
@@ -42,11 +43,14 @@ export type CourseSchedule = {
   course_name?: string;
   section?: string;
   room?: string;
+  schedule_type?: string | null;
   day?: string;
   days?: string[] | string;
   start_time?: string;
   end_time?: string;
   semester?: string;
+  semester_start?: string;
+  semester_end?: string;
 };
 
 export type CourseSchedulesResponse =

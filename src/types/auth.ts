@@ -10,6 +10,13 @@ export type AuthUser = {
   last_name: string;
   suffix: string | null;
   sex: string;
+  image?: string | null;
+  avatar?: string | null;
+  profile_photo?: string | null;
+  profile_image?: string | null;
+  profile?: {
+    imagelink?: string | null;
+  } | null;
   role: UserRole;
 };
 

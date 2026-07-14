@@ -30,13 +30,14 @@ function normalizeCourseSchedules(
       course_code: courseBlock.course.subject_code,
       course_name: courseBlock.course.name,
       section: courseBlock.block_code,
-      room: schedule.room
-        ? `${schedule.room.name}, ${schedule.room.building.code} Building`
-        : 'Room not set',
+      room: schedule.room ? schedule.room.name : 'Room not set',
+      schedule_type: schedule.schedule_type,
       days: schedule.days,
       start_time: schedule.start_time,
       end_time: schedule.end_time,
-      semester: courseBlock.semester.term,
+      semester: courseBlock.semester?.term,
+      semester_start: courseBlock.semester?.semester_start,
+      semester_end: courseBlock.semester?.semester_end,
     }));
   });
 }

@@ -1,6 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { router } from 'expo-router';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert } from 'react-native';
 
-import { setAuthToken } from '@/api/client';
+import { apiClient, setAuthToken } from '@/api/client';
 import { login } from '@/services/auth-service';
 import type { AuthSession, AuthUser, LoginCredentials } from '@/types/auth';
 import { clearStoredSession, getStoredSession, storeSession } from '@/utils/auth-storage';
@@ -19,6 +21,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
+  const isShowingExpiredAlert = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -50,6 +53,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthToken(null);
     setSession(null);
   }, []);
+
+  useEffect(() => {
+    const interceptorId = apiClient.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        const status = error?.response?.status;
+        const hasActiveSession = Boolean(session?.token);
+        const isSessionExpired = status === 401 || status === 419;
+
+        if (hasActiveSession && isSessionExpired && !isShowingExpiredAlert.current) {
+          isShowingExpiredAlert.current = true;
+          await signOut();
+
+          Alert.alert(
+            'Session expired',
+            'Your login session has expired. Please sign in again to continue.',
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  isShowingExpiredAlert.current = false;
+                  router.replace('/login');
+                },
+              },
+            ],
+            {
+              cancelable: false,
+              onDismiss: () => {
+                isShowingExpiredAlert.current = false;
+                router.replace('/login');
+              },
+            },
+          );
+        }
+
+        return Promise.reject(error);
+      },
+    );
+
+    return () => {
+      apiClient.interceptors.response.eject(interceptorId);
+    };
+  }, [session?.token, signOut]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

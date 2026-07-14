@@ -1,13 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -15,6 +14,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/context/auth-context';
+import {
+  clearRememberedUserId,
+  getRememberedUserId,
+  storeRememberedUserId,
+} from '@/utils/auth-storage';
 import { isValidUserId } from '@/utils/validators';
 
 export default function LoginScreen() {
@@ -22,10 +26,25 @@ export default function LoginScreen() {
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const normalizedUserId = userId.trim().toUpperCase();
+
+  useEffect(() => {
+    let isMounted = true;
+
+    getRememberedUserId().then((rememberedUserId) => {
+      if (!isMounted || !rememberedUserId) return;
+      setUserId(rememberedUserId);
+      setRememberMe(true);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   async function handleLogin() {
     setError(null);
@@ -43,6 +62,11 @@ export default function LoginScreen() {
     try {
       setIsSubmitting(true);
       await signIn({ user_id: normalizedUserId, password });
+      if (rememberMe) {
+        await storeRememberedUserId(normalizedUserId);
+      } else {
+        await clearRememberedUserId();
+      }
       router.replace('/');
     } catch (loginError) {
       const message =
@@ -55,26 +79,28 @@ export default function LoginScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView className="flex-1 bg-slate-50">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}>
+        className="flex-1">
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={{ flexGrow: 1 }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <View style={styles.container}>
-            <View style={styles.brandMark}>
+          <View className="flex-grow justify-center px-6 pb-[52px] pt-[30px]">
+            <View className="mb-[22px] h-16 w-16 items-center justify-center rounded-[18px] bg-blue-600">
               <Ionicons name="shield-checkmark" size={34} color="#FFFFFF" />
             </View>
-            <Text style={styles.eyebrow}>PRESENSURE</Text>
-            <Text style={styles.title}>Sign in</Text>
-            <Text style={styles.subtitle}>Use your student or account ID to continue.</Text>
+            <Text className="text-xs font-black tracking-[1.6px] text-blue-600">PRESENSURE</Text>
+            <Text className="mt-2 text-[34px] font-black text-slate-950">Sign in</Text>
+            <Text className="mt-2 max-w-[300px] text-[15px] leading-[22px] text-slate-500">
+              Use your student or account ID to continue.
+            </Text>
 
-            <View style={styles.form}>
-              <View style={styles.fieldGroup}>
-                <Text style={styles.label}>User ID</Text>
-                <View style={styles.inputShell}>
+            <View className="mt-[34px] gap-4">
+              <View className="gap-2">
+                <Text className="text-[13px] font-extrabold text-slate-700">User ID</Text>
+                <View className="min-h-14 flex-row items-center rounded-2xl border border-slate-300 bg-white px-[15px]">
                   <Ionicons name="person-outline" size={19} color="#64748B" />
                   <TextInput
                     autoCapitalize="characters"
@@ -84,15 +110,15 @@ export default function LoginScreen() {
                     placeholder="C-0000-0000"
                     placeholderTextColor="#94A3B8"
                     returnKeyType="next"
-                    style={styles.input}
+                    className="flex-1 py-3 text-base font-bold text-slate-950"
                     value={userId}
                   />
                 </View>
               </View>
 
-              <View style={styles.fieldGroup}>
-                <Text style={styles.label}>Password</Text>
-                <View style={styles.inputShell}>
+              <View className="gap-2">
+                <Text className="text-[13px] font-extrabold text-slate-700">Password</Text>
+                <View className="min-h-14 flex-row items-center rounded-2xl border border-slate-300 bg-white px-[15px]">
                   <Ionicons name="lock-closed-outline" size={19} color="#64748B" />
                   <TextInput
                     autoCapitalize="none"
@@ -102,13 +128,13 @@ export default function LoginScreen() {
                     placeholderTextColor="#94A3B8"
                     returnKeyType="done"
                     secureTextEntry={!isPasswordVisible}
-                    style={styles.input}
+                    className="flex-1 py-3 text-base font-bold text-slate-950"
                     value={password}
                   />
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => setIsPasswordVisible((current) => !current)}
-                    style={styles.iconButton}>
+                    className="h-[38px] w-[38px] items-center justify-center">
                     <Ionicons
                       name={isPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
                       size={20}
@@ -118,10 +144,30 @@ export default function LoginScreen() {
                 </View>
               </View>
 
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: rememberMe }}
+                onPress={() => setRememberMe((current) => !current)}
+                className="min-h-11 flex-row items-center gap-2.5"
+                style={({ pressed }) => pressed && { opacity: 0.76 }}>
+                <View
+                  className={`h-[22px] w-[22px] items-center justify-center rounded-[7px] border-2 ${
+                    rememberMe ? 'border-blue-600 bg-blue-600' : 'border-slate-300 bg-white'
+                  }`}>
+                  {rememberMe && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
+                </View>
+                <View className="flex-1">
+                  <Text className="text-sm font-extrabold text-slate-950">Remember me</Text>
+                  <Text className="mt-0.5 text-xs font-semibold text-slate-500">
+                    Save this user ID for next time.
+                  </Text>
+                </View>
+              </Pressable>
+
               {error && (
-                <View style={styles.errorBox}>
+                <View className="min-h-11 flex-row items-center gap-2 rounded-[14px] border border-red-200 bg-red-50 px-3">
                   <Ionicons name="alert-circle-outline" size={18} color="#B91C1C" />
-                  <Text style={styles.errorText}>{error}</Text>
+                  <Text className="flex-1 text-[13px] font-bold text-red-700">{error}</Text>
                 </View>
               )}
 
@@ -129,11 +175,9 @@ export default function LoginScreen() {
                 accessibilityRole="button"
                 disabled={isSubmitting}
                 onPress={handleLogin}
-                style={({ pressed }) => [
-                  styles.loginButton,
-                  (pressed || isSubmitting) && styles.buttonPressed,
-                ]}>
-                <Text style={styles.loginButtonText}>
+                className="mt-1 min-h-14 flex-row items-center justify-center gap-2.5 rounded-2xl bg-blue-600"
+                style={({ pressed }) => (pressed || isSubmitting) && { opacity: 0.76 }}>
+                <Text className="text-base font-black text-white">
                   {isSubmitting ? 'Signing in...' : 'Sign in'}
                 </Text>
                 <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
@@ -145,72 +189,3 @@ export default function LoginScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
-  keyboardView: { flex: 1 },
-  scrollContent: { flexGrow: 1 },
-  container: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 30,
-    paddingBottom: 52,
-  },
-  brandMark: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2563EB',
-    marginBottom: 22,
-  },
-  eyebrow: { color: '#2563EB', fontSize: 12, fontWeight: '900', letterSpacing: 1.6 },
-  title: { color: '#0F172A', fontSize: 34, fontWeight: '900', marginTop: 8 },
-  subtitle: { color: '#64748B', fontSize: 15, lineHeight: 22, marginTop: 8, maxWidth: 300 },
-  form: { marginTop: 34, gap: 16 },
-  fieldGroup: { gap: 8 },
-  label: { color: '#334155', fontSize: 13, fontWeight: '800' },
-  inputShell: {
-    minHeight: 56,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#D8E0EA',
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 15,
-  },
-  input: { flex: 1, color: '#0F172A', fontSize: 16, fontWeight: '700', paddingVertical: 12 },
-  iconButton: {
-    width: 38,
-    height: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  errorBox: {
-    minHeight: 44,
-    borderRadius: 14,
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-  },
-  errorText: { flex: 1, color: '#B91C1C', fontSize: 13, fontWeight: '700' },
-  loginButton: {
-    minHeight: 56,
-    borderRadius: 16,
-    backgroundColor: '#2563EB',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    marginTop: 4,
-  },
-  loginButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
-  buttonPressed: { opacity: 0.76 },
-});

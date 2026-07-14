@@ -1,15 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Alert,
-  FlatList,
-  PermissionsAndroid,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, FlatList, PermissionsAndroid, Platform, Pressable, Text, View } from 'react-native';
 import { BleManager, type Device, State } from 'react-native-ble-plx';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -26,18 +17,13 @@ async function requestBlePermissions() {
     ]);
 
     return (
-      result[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] ===
-        PermissionsAndroid.RESULTS.GRANTED &&
-      result[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] ===
-        PermissionsAndroid.RESULTS.GRANTED &&
-      result[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
-        PermissionsAndroid.RESULTS.GRANTED
+      result[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] === PermissionsAndroid.RESULTS.GRANTED &&
+      result[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === PermissionsAndroid.RESULTS.GRANTED &&
+      result[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] === PermissionsAndroid.RESULTS.GRANTED
     );
   }
 
-  const result = await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-  );
+  const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
   return result === PermissionsAndroid.RESULTS.GRANTED;
 }
 
@@ -62,7 +48,7 @@ export default function BleScannerScreen() {
       scanTimer.current = null;
     }
     setIsScanning(false);
-    setStatus((current) => (current === 'Scanning nearby devices…' ? 'Scan complete' : current));
+    setStatus((current) => (current === 'Scanning nearby devices...' ? 'Scan complete' : current));
   }, [manager]);
 
   useEffect(() => {
@@ -83,10 +69,7 @@ export default function BleScannerScreen() {
       const hasPermission = await requestBlePermissions();
       if (!hasPermission) {
         setStatus('Bluetooth permission denied');
-        Alert.alert(
-          'Permission needed',
-          'Allow Nearby devices access so PresenSure can discover BLE devices.',
-        );
+        Alert.alert('Permission needed', 'Allow Nearby devices access so PresenSure can discover BLE devices.');
         return;
       }
 
@@ -99,7 +82,7 @@ export default function BleScannerScreen() {
 
       setDevices([]);
       setIsScanning(true);
-      setStatus('Scanning nearby devices…');
+      setStatus('Scanning nearby devices...');
 
       manager.startDeviceScan(null, null, (error, device) => {
         if (error) {
@@ -128,73 +111,83 @@ export default function BleScannerScreen() {
   }, [isScanning, manager, stopScan]);
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <View style={styles.header}>
-        <View style={styles.iconBox}>
+    <SafeAreaView className="flex-1 bg-slate-50" edges={['top']}>
+      <View className="flex-row items-center px-5 pb-[18px] pt-3">
+        <View className="h-12 w-12 items-center justify-center rounded-[15px] bg-blue-600">
           <Ionicons name="bluetooth" size={26} color="#FFFFFF" />
         </View>
-        <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>PRESENSURE</Text>
-          <Text style={styles.title}>Nearby devices</Text>
+        <View className="ml-[13px]">
+          <Text className="text-[11px] font-extrabold tracking-[1.5px] text-blue-600">PRESENSURE</Text>
+          <Text className="text-[27px] font-extrabold text-slate-950">Nearby devices</Text>
         </View>
       </View>
 
-      <View style={styles.statusCard}>
+      <View className="mx-5 flex-row items-center justify-between rounded-[18px] border border-slate-200 bg-white p-[18px]">
         <View>
-          <Text style={styles.statusLabel}>BLE SCANNER</Text>
-          <Text style={styles.statusText}>{status}</Text>
+          <Text className="text-[11px] font-extrabold tracking-[1.2px] text-slate-500">BLE SCANNER</Text>
+          <Text className="mt-1 text-base font-bold text-slate-950">{status}</Text>
         </View>
-        <View style={[styles.statusDot, isScanning && styles.statusDotActive]} />
+        <View className={`h-3 w-3 rounded-full ${isScanning ? 'bg-green-500' : 'bg-slate-300'}`} />
       </View>
 
       <Pressable
         accessibilityRole="button"
         onPress={startScan}
-        style={({ pressed }) => [
-          styles.scanButton,
-          isScanning && styles.stopButton,
-          pressed && styles.buttonPressed,
-        ]}>
+        className={`m-5 min-h-[54px] flex-row items-center justify-center gap-[9px] rounded-2xl ${
+          isScanning ? 'bg-red-600' : 'bg-blue-600'
+        }`}
+        style={({ pressed }) => pressed && { opacity: 0.82 }}>
         <Ionicons name={isScanning ? 'stop' : 'scan'} size={20} color="#FFFFFF" />
-        <Text style={styles.scanButtonText}>{isScanning ? 'Stop scanning' : 'Scan for devices'}</Text>
+        <Text className="text-base font-extrabold text-white">
+          {isScanning ? 'Stop scanning' : 'Scan for devices'}
+        </Text>
       </Pressable>
 
-      <View style={styles.listHeader}>
-        <Text style={styles.listTitle}>Devices in range</Text>
-        <Text style={styles.deviceCount}>{devices.length}</Text>
+      <View className="mb-2.5 flex-row items-center px-5">
+        <Text className="text-lg font-extrabold text-slate-950">Devices in range</Text>
+        <Text className="ml-[9px] min-w-[25px] overflow-hidden rounded-xl bg-blue-100 px-[7px] py-[3px] text-center text-xs font-extrabold text-blue-700">
+          {devices.length}
+        </Text>
       </View>
 
       <FlatList
         data={devices}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={devices.length === 0 ? styles.emptyList : styles.deviceList}
+        contentContainerStyle={
+          devices.length === 0
+            ? { flexGrow: 1, paddingHorizontal: 32, paddingBottom: 90 }
+            : { paddingHorizontal: 20, paddingBottom: 110 }
+        }
+        ItemSeparatorComponent={() => <View className="h-2.5" />}
         renderItem={({ item }) => (
-          <View style={styles.deviceCard}>
-            <View style={styles.deviceIcon}>
+          <View className="min-h-[82px] flex-row items-center rounded-[17px] border border-slate-200 bg-white p-3.5">
+            <View className="h-11 w-11 items-center justify-center rounded-[14px] bg-blue-50">
               <Ionicons name="hardware-chip-outline" size={22} color="#2563EB" />
             </View>
-            <View style={styles.deviceDetails}>
-              <Text style={styles.deviceName} numberOfLines={1}>
+            <View className="mx-3 flex-1">
+              <Text className="text-[15px] font-extrabold text-slate-950" numberOfLines={1}>
                 {item.name ?? item.localName ?? 'Unnamed BLE device'}
               </Text>
-              <Text style={styles.deviceId} numberOfLines={1}>
+              <Text className="mt-1 text-[11px] text-slate-400" numberOfLines={1}>
                 {item.id}
               </Text>
             </View>
-            <View style={styles.signal}>
+            <View className="items-end">
               <Ionicons name="cellular" size={17} color="#64748B" />
-              <Text style={styles.signalText}>{signalLabel(item.rssi)}</Text>
-              <Text style={styles.rssi}>{item.rssi === null ? '—' : `${item.rssi} dBm`}</Text>
+              <Text className="mt-1 text-[11px] font-bold text-slate-600">{signalLabel(item.rssi)}</Text>
+              <Text className="mt-0.5 text-[10px] text-slate-400">
+                {item.rssi === null ? '-' : `${item.rssi} dBm`}
+              </Text>
             </View>
           </View>
         )}
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
+          <View className="flex-1 items-center justify-center">
+            <View className="h-[72px] w-[72px] items-center justify-center rounded-3xl bg-slate-200">
               <Ionicons name="radio-outline" size={34} color="#64748B" />
             </View>
-            <Text style={styles.emptyTitle}>No devices found yet</Text>
-            <Text style={styles.emptyText}>
+            <Text className="mt-4 text-[17px] font-extrabold text-slate-950">No devices found yet</Text>
+            <Text className="mt-[7px] max-w-[300px] text-center text-sm leading-[21px] text-slate-500">
               Make sure your BLE device is powered on and advertising, then start a scan.
             </Text>
           </View>
@@ -203,117 +196,3 @@ export default function BleScannerScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 18,
-  },
-  iconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 15,
-    backgroundColor: '#2563EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCopy: { marginLeft: 13 },
-  eyebrow: { color: '#2563EB', fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
-  title: { color: '#0F172A', fontSize: 27, fontWeight: '800', letterSpacing: -0.5 },
-  statusCard: {
-    marginHorizontal: 20,
-    padding: 18,
-    borderRadius: 18,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  statusLabel: { color: '#64748B', fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
-  statusText: { color: '#0F172A', fontSize: 16, fontWeight: '700', marginTop: 5 },
-  statusDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#CBD5E1' },
-  statusDotActive: { backgroundColor: '#22C55E' },
-  scanButton: {
-    margin: 20,
-    minHeight: 54,
-    borderRadius: 16,
-    backgroundColor: '#2563EB',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 9,
-  },
-  stopButton: { backgroundColor: '#DC2626' },
-  buttonPressed: { opacity: 0.82 },
-  scanButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
-  listHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 10,
-  },
-  listTitle: { color: '#0F172A', fontSize: 18, fontWeight: '800' },
-  deviceCount: {
-    marginLeft: 9,
-    minWidth: 25,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 12,
-    overflow: 'hidden',
-    textAlign: 'center',
-    backgroundColor: '#DBEAFE',
-    color: '#1D4ED8',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  deviceList: { paddingHorizontal: 20, paddingBottom: 110, gap: 10 },
-  deviceCard: {
-    minHeight: 82,
-    padding: 14,
-    borderRadius: 17,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  deviceIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: '#EFF6FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deviceDetails: { flex: 1, marginHorizontal: 12 },
-  deviceName: { color: '#0F172A', fontSize: 15, fontWeight: '800' },
-  deviceId: { color: '#94A3B8', fontSize: 11, marginTop: 5 },
-  signal: { alignItems: 'flex-end' },
-  signalText: { color: '#475569', fontSize: 11, fontWeight: '700', marginTop: 3 },
-  rssi: { color: '#94A3B8', fontSize: 10, marginTop: 2 },
-  emptyList: { flexGrow: 1, paddingHorizontal: 32, paddingBottom: 90 },
-  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  emptyIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 24,
-    backgroundColor: '#E2E8F0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTitle: { color: '#0F172A', fontSize: 17, fontWeight: '800', marginTop: 16 },
-  emptyText: {
-    color: '#64748B',
-    fontSize: 14,
-    lineHeight: 21,
-    textAlign: 'center',
-    marginTop: 7,
-    maxWidth: 300,
-  },
-});
