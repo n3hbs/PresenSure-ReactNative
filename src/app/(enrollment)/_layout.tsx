@@ -4,7 +4,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { useAppTheme } from '@/app/providers/theme-provider';
 import { useAuth } from '@/context/auth-context';
 
-export default function AuthLayout() {
+export default function EnrollmentLayout() {
   const theme = useAppTheme();
   const { isAuthenticated, isLoadingSession } = useAuth();
 
@@ -22,9 +22,7 @@ export default function AuthLayout() {
     );
   }
 
-  if (isAuthenticated) {
-    return <Redirect href="/" />;
-  }
+  if (!isAuthenticated) return <Redirect href="/login" />;
 
   return <Stack screenOptions={{ headerShown: false }} />;
 }

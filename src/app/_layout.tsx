@@ -1,16 +1,21 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 
-import { AuthProvider } from "@/context/auth-context";
+import { AppProviders } from "@/app/providers/app-providers";
+import { useAppTheme } from "@/app/providers/theme-provider";
 import "../global.css";
 
-export default function RootLayout() {
+function RootNavigator() {
+  const theme = useAppTheme();
+
   return (
-    <AuthProvider>
-      <StatusBar style="dark" />
+    <>
+      <StatusBar style={theme.statusBarStyle} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(enrollment)" />
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="device-registration" />
         <Stack.Screen
           name="schedule-detail"
           options={{
@@ -26,6 +31,14 @@ export default function RootLayout() {
           }}
         />
       </Stack>
-    </AuthProvider>
+    </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <AppProviders>
+      <RootNavigator />
+    </AppProviders>
   );
 }

@@ -41,3 +41,7 @@ example
 # generated native folders
 /ios
 /android
+
+PRD.md
+docs/PRD-REACT-NATIVE.md
+prompt/prompt.txt
