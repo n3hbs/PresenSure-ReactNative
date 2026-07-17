@@ -1,5 +1,5 @@
-import { Ionicons } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
+import { CalendarDays, Home, ShieldCheck } from 'lucide-react-native';
 import { ActivityIndicator, View } from 'react-native';
 
 import { useAppTheme } from '@/app/providers/theme-provider';
@@ -61,7 +61,7 @@ export default function TabsLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" color={color} size={size} />
+            <Home color={color} size={size} />
           ),
         }}
       />
@@ -70,7 +70,7 @@ export default function TabsLayout() {
         options={{
           title: 'Attendance',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="shield-checkmark-outline" color={color} size={size} />
+            <ShieldCheck color={color} size={size} />
           ),
         }}
       />
@@ -79,27 +79,13 @@ export default function TabsLayout() {
         options={{
           title: 'History',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar-outline" color={color} size={size} />
+            <CalendarDays color={color} size={size} />
           ),
         }}
       />
       <Tabs.Screen
         name="notifications"
-        options={{
-          title: 'Alerts',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="notifications-outline" color={color} size={size} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-circle-outline" color={color} size={size} />
-          ),
-        }}
+        options={{ href: null }}
       />
       <Tabs.Screen name="scanner" options={{ href: null }} />
       <Tabs.Screen name="face-recognition" options={{ href: null }} />

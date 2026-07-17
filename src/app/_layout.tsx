@@ -1,16 +1,24 @@
-import { Stack } from "expo-router";
-import { StatusBar } from "expo-status-bar";
+import { Stack, usePathname } from "expo-router";
+import { StatusBar } from "react-native";
 
 import { AppProviders } from "@/app/providers/app-providers";
 import { useAppTheme } from "@/app/providers/theme-provider";
 import "../global.css";
 
 function RootNavigator() {
+  const pathname = usePathname();
   const theme = useAppTheme();
+  const hasBlueTopArea =
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname === "/profile";
 
   return (
     <>
-      <StatusBar style={theme.statusBarStyle} />
+      <StatusBar
+        backgroundColor={hasBlueTopArea ? "#2563EB" : theme.colors.background}
+        barStyle={theme.resolvedMode === "dark" ? "light-content" : "dark-content"}
+      />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(enrollment)" />

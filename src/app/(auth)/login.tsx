@@ -1,5 +1,5 @@
-import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { AlertCircle, ArrowRight, Check, Eye, EyeOff, Lock, ShieldCheck, User } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAppTheme } from '@/app/providers/theme-provider';
 import { useAuth } from '@/context/auth-context';
 import {
   clearRememberedUserId,
@@ -22,6 +23,7 @@ import {
 import { isValidUserId } from '@/utils/validators';
 
 export default function LoginScreen() {
+  const theme = useAppTheme();
   const { signIn } = useAuth();
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
@@ -79,67 +81,74 @@ export default function LoginScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-slate-50">
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#2563EB' }} edges={['top']}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        className="flex-1">
+        className="flex-1"
+        style={{ backgroundColor: theme.colors.background }}>
         <ScrollView
           contentContainerStyle={{ flexGrow: 1 }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View className="flex-grow justify-center px-6 pb-[52px] pt-[30px]">
             <View className="mb-[22px] h-16 w-16 items-center justify-center rounded-[18px] bg-blue-600">
-              <Ionicons name="shield-checkmark" size={34} color="#FFFFFF" />
+              <ShieldCheck size={34} color="#FFFFFF" />
             </View>
             <Text className="text-xs font-black tracking-[1.6px] text-blue-600">PRESENSURE</Text>
-            <Text className="mt-2 text-[34px] font-black text-slate-950">Sign in</Text>
-            <Text className="mt-2 max-w-[300px] text-[15px] leading-[22px] text-slate-500">
+            <Text className="mt-2 text-[34px] font-black" style={{ color: theme.colors.text }}>Sign in</Text>
+            <Text className="mt-2 max-w-[300px] text-[15px] leading-[22px]" style={{ color: theme.colors.textMuted }}>
               Use your student or account ID to continue.
             </Text>
 
             <View className="mt-[34px] gap-4">
               <View className="gap-2">
-                <Text className="text-[13px] font-extrabold text-slate-700">User ID</Text>
-                <View className="min-h-14 flex-row items-center rounded-2xl border border-slate-300 bg-white px-[15px]">
-                  <Ionicons name="person-outline" size={19} color="#64748B" />
+                <Text className="text-[13px] font-extrabold" style={{ color: theme.colors.text }}>User ID</Text>
+                <View
+                  className="min-h-14 flex-row items-center rounded-2xl px-[15px]"
+                  style={{ backgroundColor: theme.colors.surface, borderRadius: 16 }}>
+                  <User size={19} color={theme.colors.textMuted} />
                   <TextInput
                     autoCapitalize="characters"
                     autoCorrect={false}
                     keyboardType="default"
                     onChangeText={setUserId}
                     placeholder="C-0000-0000"
-                    placeholderTextColor="#94A3B8"
+                    placeholderTextColor={theme.colors.textMuted}
                     returnKeyType="next"
                     className="flex-1 py-3 text-base font-bold text-slate-950"
+                    style={{ color: theme.colors.text }}
                     value={userId}
                   />
                 </View>
               </View>
 
               <View className="gap-2">
-                <Text className="text-[13px] font-extrabold text-slate-700">Password</Text>
-                <View className="min-h-14 flex-row items-center rounded-2xl border border-slate-300 bg-white px-[15px]">
-                  <Ionicons name="lock-closed-outline" size={19} color="#64748B" />
+                <Text className="text-[13px] font-extrabold" style={{ color: theme.colors.text }}>Password</Text>
+                <View
+                  className="min-h-14 flex-row items-center rounded-2xl px-[15px]"
+                  style={{ backgroundColor: theme.colors.surface, borderRadius: 16 }}>
+                  <Lock size={19} color={theme.colors.textMuted} />
                   <TextInput
                     autoCapitalize="none"
                     onChangeText={setPassword}
                     onSubmitEditing={handleLogin}
                     placeholder="Password"
-                    placeholderTextColor="#94A3B8"
+                    placeholderTextColor={theme.colors.textMuted}
                     returnKeyType="done"
                     secureTextEntry={!isPasswordVisible}
                     className="flex-1 py-3 text-base font-bold text-slate-950"
+                    style={{ color: theme.colors.text }}
                     value={password}
                   />
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => setIsPasswordVisible((current) => !current)}
                     className="h-[38px] w-[38px] items-center justify-center">
-                    <Ionicons
-                      name={isPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
-                      size={20}
-                      color="#475569"
-                    />
+                    {isPasswordVisible ? (
+                      <EyeOff size={20} color={theme.colors.textMuted} />
+                    ) : (
+                      <Eye size={20} color={theme.colors.textMuted} />
+                    )}
                   </Pressable>
                 </View>
               </View>
@@ -151,14 +160,16 @@ export default function LoginScreen() {
                 className="min-h-11 flex-row items-center gap-2.5"
                 style={({ pressed }) => pressed && { opacity: 0.76 }}>
                 <View
-                  className={`h-[22px] w-[22px] items-center justify-center rounded-[7px] border-2 ${
-                    rememberMe ? 'border-blue-600 bg-blue-600' : 'border-slate-300 bg-white'
-                  }`}>
-                  {rememberMe && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
+                  className="h-[22px] w-[22px] items-center justify-center rounded-[7px] border-2"
+                  style={{
+                    backgroundColor: rememberMe ? theme.colors.primary : theme.colors.surface,
+                    borderColor: rememberMe ? theme.colors.primary : theme.colors.border,
+                  }}>
+                  {rememberMe && <Check size={15} color="#FFFFFF" />}
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm font-extrabold text-slate-950">Remember me</Text>
-                  <Text className="mt-0.5 text-xs font-semibold text-slate-500">
+                  <Text className="text-sm font-extrabold" style={{ color: theme.colors.text }}>Remember me</Text>
+                  <Text className="mt-0.5 text-xs font-semibold" style={{ color: theme.colors.textMuted }}>
                     Save this user ID for next time.
                   </Text>
                 </View>
@@ -166,7 +177,7 @@ export default function LoginScreen() {
 
               {error && (
                 <View className="min-h-11 flex-row items-center gap-2 rounded-[14px] border border-red-200 bg-red-50 px-3">
-                  <Ionicons name="alert-circle-outline" size={18} color="#B91C1C" />
+                  <AlertCircle size={18} color="#B91C1C" />
                   <Text className="flex-1 text-[13px] font-bold text-red-700">{error}</Text>
                 </View>
               )}
@@ -180,7 +191,7 @@ export default function LoginScreen() {
                 <Text className="text-base font-black text-white">
                   {isSubmitting ? 'Signing in...' : 'Sign in'}
                 </Text>
-                <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+                <ArrowRight size={20} color="#FFFFFF" />
               </Pressable>
             </View>
           </View>

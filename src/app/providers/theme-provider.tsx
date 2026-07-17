@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
 
-export type AppThemeMode = 'light' | 'dark' | 'system';
+export type AppThemeMode = 'light' | 'dark';
 export type ResolvedThemeMode = 'light' | 'dark';
 
 const THEME_MODE_KEY = 'presensure.theme.mode';
@@ -66,16 +66,19 @@ type ThemeContextValue = {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const systemScheme = useColorScheme();
-  const [mode, setStoredMode] = useState<AppThemeMode>('system');
+  const [mode, setStoredMode] = useState<AppThemeMode>('light');
+  const [transitionColor, setTransitionColor] = useState<string | null>(null);
+  const [transitionOpacity] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     let isMounted = true;
 
-    AsyncStorage.getItem(THEME_MODE_KEY).then((storedMode) => {
+    AsyncStorage.getItem(THEME_MODE_KEY).then(async (storedMode) => {
       if (!isMounted) return;
-      if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
+      if (storedMode === 'light' || storedMode === 'dark') {
         setStoredMode(storedMode);
+      } else if (storedMode === 'system') {
+        await AsyncStorage.setItem(THEME_MODE_KEY, 'light');
       }
     });
 
@@ -84,13 +87,30 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const setMode = async (nextMode: AppThemeMode) => {
-    setStoredMode(nextMode);
-    await AsyncStorage.setItem(THEME_MODE_KEY, nextMode);
-  };
+  const setMode = useCallback(async (nextMode: AppThemeMode) => {
+    if (nextMode === mode) return;
 
-  const resolvedMode: ResolvedThemeMode =
-    mode === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : mode;
+    transitionOpacity.stopAnimation();
+    transitionOpacity.setValue(1);
+    setTransitionColor(themeTokens[mode].colors.background);
+    setStoredMode(nextMode);
+    const storageUpdate = AsyncStorage.setItem(THEME_MODE_KEY, nextMode);
+
+    Animated.timing(transitionOpacity, {
+      toValue: 0,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setTransitionColor(null);
+      }
+    });
+
+    await storageUpdate;
+  }, [mode, transitionOpacity]);
+
+  const resolvedMode: ResolvedThemeMode = mode;
 
   const value = useMemo<ThemeContextValue>(() => {
     const theme = themeTokens[resolvedMode];
@@ -104,9 +124,29 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       radii,
       statusBarStyle: theme.statusBarStyle,
     };
-  }, [mode, resolvedMode]);
+  }, [mode, resolvedMode, setMode]);
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={value}>
+      <View style={styles.container}>
+        {children}
+        {transitionColor ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: transitionColor,
+                elevation: 999,
+                opacity: transitionOpacity,
+                zIndex: 999,
+              },
+            ]}
+          />
+        ) : null}
+      </View>
+    </ThemeContext.Provider>
+  );
 }
 
 export function useAppTheme() {
@@ -118,3 +158,9 @@ export function useAppTheme() {
 
   return context;
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+});
