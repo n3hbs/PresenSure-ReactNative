@@ -1,12 +1,14 @@
 import { router } from 'expo-router';
 import { AlertCircle, ArrowRight, Check, Eye, EyeOff, Lock, ShieldCheck, User } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
+  type ScrollView as ScrollViewType,
   Text,
   TextInput,
   View,
@@ -30,7 +32,9 @@ export default function LoginScreen() {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const scrollViewRef = useRef<ScrollViewType>(null);
 
   const normalizedUserId = userId.trim().toUpperCase();
 
@@ -47,6 +51,29 @@ export default function LoginScreen() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      setIsKeyboardVisible(true);
+      requestAnimationFrame(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      });
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  function scrollFormControlsIntoView() {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 120);
+  }
 
   async function handleLogin() {
     setError(null);
@@ -87,10 +114,19 @@ export default function LoginScreen() {
         className="flex-1"
         style={{ backgroundColor: theme.colors.background }}>
         <ScrollView
-          contentContainerStyle={{ flexGrow: 1 }}
+          ref={scrollViewRef}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          contentContainerStyle={{
+            flexGrow: 1,
+            justifyContent: isKeyboardVisible ? 'flex-start' : 'center',
+            paddingBottom: isKeyboardVisible ? 220 : 120,
+            paddingHorizontal: 24,
+            paddingTop: isKeyboardVisible ? 18 : 30,
+          }}
+          keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <View className="flex-grow justify-center px-6 pb-[52px] pt-[30px]">
+          <View>
             <View className="mb-[22px] h-16 w-16 items-center justify-center rounded-[18px] bg-blue-600">
               <ShieldCheck size={34} color="#FFFFFF" />
             </View>
@@ -112,6 +148,7 @@ export default function LoginScreen() {
                     autoCorrect={false}
                     keyboardType="default"
                     onChangeText={setUserId}
+                    onFocus={scrollFormControlsIntoView}
                     placeholder="C-0000-0000"
                     placeholderTextColor={theme.colors.textMuted}
                     returnKeyType="next"
@@ -131,6 +168,7 @@ export default function LoginScreen() {
                   <TextInput
                     autoCapitalize="none"
                     onChangeText={setPassword}
+                    onFocus={scrollFormControlsIntoView}
                     onSubmitEditing={handleLogin}
                     placeholder="Password"
                     placeholderTextColor={theme.colors.textMuted}

@@ -17,6 +17,7 @@ export type ApiCourseScheduleItem = {
     };
     schedules: {
       schedule_id: number;
+      period_id?: number | null;
       block_code: string;
       schedule_type?: string | null;
       start_time: string;
@@ -38,6 +39,7 @@ export type ApiCourseScheduleItem = {
 
 export type CourseSchedule = {
   id: string | number;
+  period_id?: string | number | null;
   course_id?: string | number;
   course_code?: string;
   course_name?: string;

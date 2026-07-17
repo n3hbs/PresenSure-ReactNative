@@ -26,6 +26,7 @@ function normalizeCourseSchedules(
 
     return courseBlock.schedules.map<CourseSchedule>((schedule) => ({
       id: schedule.schedule_id,
+      period_id: schedule.period_id ?? null,
       course_id: courseBlock.course.course_id,
       course_code: courseBlock.course.subject_code,
       course_name: courseBlock.course.name,
