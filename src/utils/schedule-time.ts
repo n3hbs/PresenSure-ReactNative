@@ -135,14 +135,14 @@ export function parseTimeToMinutes(time?: string) {
   return Number(hours) * 60 + Number(minutes);
 }
 
-export function getManilaNow() {
+export function getManilaClockFromDate(date: Date) {
   const parts = new Intl.DateTimeFormat('en-US', {
     hour: '2-digit',
     hourCycle: 'h23',
     minute: '2-digit',
     timeZone: MANILA_TIME_ZONE,
     weekday: 'long',
-  }).formatToParts(new Date());
+  }).formatToParts(date);
 
   const weekday = parts.find((part) => part.type === 'weekday')?.value.toLowerCase() ?? 'monday';
   const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? '0');
@@ -152,6 +152,21 @@ export function getManilaNow() {
     dayIndex: DAY_DATE_INDEX[weekday] ?? 1,
     minutes: hour * 60 + minute,
   };
+}
+
+export function getManilaNow() {
+  return getManilaClockFromDate(new Date());
+}
+
+export function formatDateTimeInManila(value: Date | string) {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return typeof value === 'string' ? value : 'Not set';
+
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: MANILA_TIME_ZONE,
+  }).format(date);
 }
 
 export function isScheduleToday(schedule: CourseSchedule, manilaNow = getManilaNow()) {
