@@ -40,6 +40,7 @@ export type ApiCourseScheduleItem = {
 export type CourseSchedule = {
   id: string | number;
   period_id?: string | number | null;
+  room_id?: string | number | null;
   course_id?: string | number;
   course_code?: string;
   course_name?: string;

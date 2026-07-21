@@ -31,6 +31,7 @@ function normalizeCourseSchedules(
       course_code: courseBlock.course.subject_code,
       course_name: courseBlock.course.name,
       section: courseBlock.block_code,
+      room_id: schedule.room?.room_id ?? null,
       room: schedule.room ? schedule.room.name : 'Room not set',
       schedule_type: schedule.schedule_type,
       days: schedule.days,

@@ -10,7 +10,11 @@ import {
 import { Platform } from "react-native";
 
 import { requestPresenSurePermission } from "@/features/permissions/permission-service";
-import type { Esp32SessionConfiguration } from "@/types/attendance-session";
+import type {
+  Esp32ConfigurationStatus,
+  Esp32StartSessionCommand,
+} from "@/types/attendance-session";
+import { logError } from "@/utils/logger";
 
 const SCAN_TIMEOUT_MS = 8_000;
 const ADAPTER_STATE_TIMEOUT_MS = 5_000;
@@ -32,23 +36,15 @@ export type DetectedEsp32Beacon = {
 
 export type Esp32DeviceInfo = {
   device_id: string;
-  protocol_version: number;
-  firmware_version: string;
-  platform: string;
+  device_name: string;
+  room_id: number;
+  provisioned: boolean;
+  device_status: string;
 };
 
 export type ConnectedEsp32Beacon = {
   device: Device;
   info: Esp32DeviceInfo;
-};
-
-export type Esp32ConfigurationStatus = {
-  code: number;
-  status: string;
-  active: boolean;
-  configured: boolean;
-  epoch: number;
-  session_id?: string;
 };
 
 function bytesToBase64(value: string) {
@@ -74,19 +70,27 @@ function parseJsonCharacteristic<T>(value: string | null, label: string): T {
 }
 
 function validateDeviceInfo(value: Esp32DeviceInfo) {
-  if (!value.device_id || value.protocol_version !== 1) {
+  if (
+    !value.device_id ||
+    !value.device_name ||
+    !Number.isInteger(value.room_id) ||
+    value.room_id < 1 ||
+    value.provisioned !== true ||
+    value.device_status !== "ready"
+  ) {
     throw new Error("The ESP32 returned unsupported device information.");
   }
   return value;
 }
 
-function validateConfiguration(configuration: Esp32SessionConfiguration) {
+function validateConfiguration(configuration: Esp32StartSessionCommand) {
   if (
-    !configuration.session_id ||
-    !configuration.rotating_secret ||
-    !/^[a-f0-9]{64}$/.test(configuration.signature) ||
+    configuration.command !== "START_SESSION" ||
+    !configuration.session_code ||
     ![1, 2, 3].includes(configuration.attendance_type) ||
     typeof configuration.continuous !== "boolean" ||
+    !configuration.rotating_secret ||
+    !configuration.signature ||
     configuration.start_time < 1_609_459_200 ||
     configuration.end_time <= configuration.start_time ||
     configuration.advertisement_interval_ms < 100 ||
@@ -257,6 +261,9 @@ export async function scanForEsp32Beacons(scheduleRoom?: string | null) {
       if (settled) return;
 
       if (scanError) {
+        logError("ble.scan.callback", scanError, {
+          errorCode: scanError.errorCode,
+        });
         settled = true;
         clearTimeout(timeout);
         manager.stopDeviceScan();
@@ -305,6 +312,7 @@ export async function connectToEsp32Beacon(deviceId: string) {
 
     return { device: discoveredDevice, info } satisfies ConnectedEsp32Beacon;
   } catch (error) {
+    logError("ble.connect", error, { blePeripheralId: deviceId });
     if (await manager.isDeviceConnected(deviceId).catch(() => false)) {
       await manager.cancelDeviceConnection(deviceId).catch(() => undefined);
     }
@@ -314,7 +322,7 @@ export async function connectToEsp32Beacon(deviceId: string) {
 
 export async function configureEsp32Attendance(
   deviceId: string,
-  configuration: Esp32SessionConfiguration,
+  configuration: Esp32StartSessionCommand,
 ) {
   validateConfiguration(configuration);
   if (!(await manager.isDeviceConnected(deviceId))) {
@@ -327,7 +335,6 @@ export async function configureEsp32Attendance(
   return new Promise<Esp32ConfigurationStatus>((resolve, reject) => {
     let settled = false;
     let writeStarted = false;
-    let writeCompleted = false;
     let statusSubscription: Subscription | null = null;
     let disconnectSubscription: Subscription | null = null;
 
@@ -340,7 +347,13 @@ export async function configureEsp32Attendance(
       clearTimeout(timeout);
       statusSubscription?.remove();
       disconnectSubscription?.remove();
-      if (error) reject(error);
+      if (error) {
+        logError("ble.session-command", error, {
+          blePeripheralId: deviceId,
+          sessionCode: configuration.session_code,
+        });
+        reject(error);
+      }
       else if (status) resolve(status);
     };
 
@@ -352,36 +365,34 @@ export async function configureEsp32Attendance(
       );
     }, CONFIGURATION_ACK_TIMEOUT_MS);
 
-    const acceptedStatus = (): Esp32ConfigurationStatus => ({
-      code: 0,
-      status: "OK",
-      active: true,
-      configured: true,
-      epoch: configuration.start_time,
-      session_id: configuration.session_id,
-    });
-
     const handleStatus = (status: Esp32ConfigurationStatus) => {
-      if (status.code === 0 && status.status === "OK" && status.active) {
+      if ("code" in status) {
+        if (status.code === 0 && status.status === "OK" && status.active) {
+          finish(null, status);
+        } else if (status.status !== "NO_ACTIVE_SESSION") {
+          finish(
+            new Error(
+              `ESP32 rejected the session configuration: ${status.status || `code ${status.code}`}.`,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (status.success && status.advertising) {
         finish(null, status);
-      } else if (status.status !== "NO_ACTIVE_SESSION") {
+      } else if (!status.success) {
         finish(
           new Error(
-            `ESP32 rejected the session configuration: ${status.status || `code ${status.code}`}.`,
+            status.message ||
+              `ESP32 rejected the session command: ${status.error_code || "UNKNOWN_ERROR"}.`,
           ),
         );
       }
     };
 
     disconnectSubscription = manager.onDeviceDisconnected(deviceId, (error) => {
-      if (!writeCompleted) {
-        finish(formatBleError(error, "The ESP32 disconnected before configuration."));
-        return;
-      }
-
-      // Current firmware disconnects only after it accepts and starts a valid
-      // configuration. Its status notification can race with that disconnect.
-      finish(null, acceptedStatus());
+      finish(formatBleError(error, "The ESP32 disconnected before confirming advertising."));
     });
 
     statusSubscription = manager.monitorCharacteristicForDevice(
@@ -390,15 +401,12 @@ export async function configureEsp32Attendance(
       STATUS_CHARACTERISTIC_UUID,
       (error, characteristic) => {
         if (error) {
-          if (
-            writeCompleted &&
-            error instanceof BleError &&
-            error.errorCode === BleErrorCode.DeviceDisconnected
-          ) {
-            finish(null, acceptedStatus());
-          } else if (writeStarted) {
-            finish(formatBleError(error, "Unable to read ESP32 status."));
-          }
+          finish(
+            formatBleError(
+              error,
+              "Unable to subscribe to ESP32 session status notifications.",
+            ),
+          );
           return;
         }
         if (!writeStarted || !characteristic?.value) return;
@@ -423,38 +431,6 @@ export async function configureEsp32Attendance(
         CONFIGURATION_CHARACTERISTIC_UUID,
         encodedConfiguration,
       )
-      .then(() => {
-        writeCompleted = true;
-        // The firmware notification can race its immediate disconnect. Reading
-        // status also captures rejection responses when a notification is lost.
-        setTimeout(() => {
-          if (settled) return;
-          manager
-            .readCharacteristicForDevice(
-              deviceId,
-              PRESENSURE_SERVICE_UUID,
-              STATUS_CHARACTERISTIC_UUID,
-            )
-            .then((characteristic) => {
-              handleStatus(
-                parseJsonCharacteristic<Esp32ConfigurationStatus>(
-                  characteristic.value,
-                  "ESP32 status",
-                ),
-              );
-            })
-            .catch((error) => {
-              if (
-                error instanceof BleError &&
-                error.errorCode === BleErrorCode.DeviceDisconnected
-              ) {
-                finish(null, acceptedStatus());
-              } else if (error instanceof Error) {
-                finish(error);
-              }
-            });
-        }, 250);
-      })
       .catch((error) => {
         finish(formatBleError(error, "Unable to write the session configuration to the ESP32."));
       });
@@ -466,6 +442,9 @@ export function subscribeToEsp32Disconnection(
   listener: (message: string | null) => void,
 ) {
   return manager.onDeviceDisconnected(deviceId, (error) => {
+    if (error) {
+      logError("ble.disconnected", error, { blePeripheralId: deviceId });
+    }
     listener(error ? formatBleError(error, "The ESP32 disconnected.").message : null);
   });
 }

@@ -159,20 +159,20 @@ export function Esp32BeaconPickerModal({
             <Text
               className="mt-3 text-center text-xs font-bold leading-5"
               style={{ color: theme.colors.danger }}>
-              This beacon does not match {roomName ?? "the scheduled room"}. Select the beacon
-              marked Match.
+              The device name does not match {roomName ?? "the scheduled room"}. Its room ID will
+              be verified after connection.
             </Text>
           ) : null}
 
           <Pressable
             accessibilityRole="button"
-            disabled={!selectedBeacon?.isRecommended || isScanning}
+            disabled={!selectedBeacon || isScanning}
             onPress={() => {
-              if (selectedBeacon?.isRecommended) onConfirm(selectedBeacon);
+              if (selectedBeacon) onConfirm(selectedBeacon);
             }}
             className="mt-4 min-h-[48px] items-center justify-center rounded-md"
             style={{
-              backgroundColor: selectedBeacon?.isRecommended
+              backgroundColor: selectedBeacon
                 ? theme.colors.primary
                 : theme.colors.border,
             }}>

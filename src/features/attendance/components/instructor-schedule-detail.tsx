@@ -24,10 +24,10 @@ import {
   scanForEsp32Beacons,
   subscribeToEsp32Disconnection,
   type DetectedEsp32Beacon,
+  type Esp32DeviceInfo,
 } from "@/services/ble/esp32-beacon-connection";
 import type {
   AttendanceSession,
-  BleSourceType,
   VerificationMode,
 } from "@/types/attendance-session";
 import type { CourseSchedule } from "@/types/course-schedule";
@@ -39,8 +39,8 @@ import {
   isScheduleActive,
   parseTimeToMinutes,
 } from "@/utils/schedule-time";
+import { logError } from "@/utils/logger";
 
-const DEFAULT_PERIOD_ID = 3;
 const MIN_DURATION_MINUTES = 15;
 const DURATION_STEP_MINUTES = 5;
 
@@ -124,6 +124,8 @@ export function InstructorScheduleDetail({
     useState<DetectedEsp32Beacon | null>(null);
   const [isBeaconModalVisible, setIsBeaconModalVisible] = useState(false);
   const [esp32Connected, setEsp32Connected] = useState(false);
+  const [esp32DeviceInfo, setEsp32DeviceInfo] =
+    useState<Esp32DeviceInfo | null>(null);
   const [esp32Advertising, setEsp32Advertising] = useState(false);
   const [esp32ConnectionLabel, setEsp32ConnectionLabel] = useState<
     string | null
@@ -144,9 +146,9 @@ export function InstructorScheduleDetail({
   const disconnectionSubscriptionRef = useRef<{ remove: () => void } | null>(null);
 
   const scheduleId = useMemo(() => toNumericId(schedule.id), [schedule.id]);
-  const periodId = useMemo(
-    () => toNumericId(schedule.period_id) ?? DEFAULT_PERIOD_ID,
-    [schedule.period_id],
+  const scheduleRoomId = useMemo(
+    () => toNumericId(schedule.room_id),
+    [schedule.room_id],
   );
   const serverClock = useMemo(
     () => getManilaClockFromDate(serverNow),
@@ -165,8 +167,7 @@ export function InstructorScheduleDetail({
   const selectedEndTime = formatMinutesAsTime(
     serverClock.minutes + selectedDurationMinutes,
   );
-  const payloadBleSource: BleSourceType = "room_beacon";
-  const selectedBeaconId = selectedBeacon?.beaconId ?? null;
+  const selectedBeaconId = esp32DeviceInfo?.device_id ?? null;
 
   useEffect(() => {
     let isMounted = true;
@@ -204,12 +205,11 @@ export function InstructorScheduleDetail({
   const canSubmit =
     activeNow &&
     scheduleId !== null &&
-    periodId !== null &&
+    scheduleRoomId !== null &&
     canMeetMinimumDuration &&
     esp32Connected &&
     !isSubmitting &&
-    selectedBeaconId !== null &&
-    selectedBeacon?.isRecommended === true;
+    selectedBeaconId !== null;
 
   const disabledReason = !activeNow
     ? "Attendance can start only during the scheduled class time."
@@ -217,13 +217,11 @@ export function InstructorScheduleDetail({
       ? "Remaining schedule time is less than 15 minutes."
       : scheduleId === null
         ? "Schedule ID is unavailable."
-        : periodId === null
-          ? "Period ID is unavailable for this schedule."
+        : scheduleRoomId === null
+          ? "Room ID is unavailable for this schedule."
           : selectedBeaconId === null
             ? "Select the ESP32 beacon detected for this room."
-            : selectedBeacon?.isRecommended !== true
-              ? `Select the ESP32 beacon that matches ${schedule.room ?? "this schedule room"}.`
-              : !esp32Connected
+            : !esp32Connected
                 ? "Connect successfully to the ESP32 BLE beacon before starting attendance."
                 : null;
 
@@ -255,6 +253,7 @@ export function InstructorScheduleDetail({
     setIsScanningEsp32(true);
     setError(null);
     setEsp32Connected(false);
+    setEsp32DeviceInfo(null);
     setEsp32Advertising(false);
     setEsp32ConnectionLabel(null);
 
@@ -277,6 +276,11 @@ export function InstructorScheduleDetail({
         );
       }
     } catch (scanError) {
+      logError("attendance.ble.scan", scanError, {
+        scheduleId,
+        scheduleRoomId,
+        scheduleRoomName: schedule.room,
+      });
       const message =
         scanError instanceof Error
           ? scanError.message
@@ -293,23 +297,27 @@ export function InstructorScheduleDetail({
       return;
     }
 
-    if (!beacon.isRecommended) {
-      setError(
-        `${beacon.name} does not match the scheduled room ${schedule.room ?? "for this class"}.`,
-      );
-      return;
-    }
-
     setSelectedBeacon(beacon);
     setIsBeaconModalVisible(false);
     setIsConnectingEsp32(true);
     setError(null);
     setEsp32Connected(false);
+    setEsp32DeviceInfo(null);
     setEsp32Advertising(false);
     setEsp32ConnectionLabel(null);
 
     try {
       const { device, info } = await connectToEsp32Beacon(beacon.id);
+      if (scheduleRoomId === null) {
+        await disconnectFromEsp32Beacon(device.id).catch(() => undefined);
+        throw new Error("This schedule does not include a room ID.");
+      }
+      if (info.room_id !== scheduleRoomId) {
+        await disconnectFromEsp32Beacon(device.id).catch(() => undefined);
+        throw new Error(
+          `${info.device_name} belongs to room ${info.room_id}, but this schedule belongs to room ${scheduleRoomId}.`,
+        );
+      }
       connectedDeviceIdRef.current = device.id;
       disconnectionSubscriptionRef.current?.remove();
       disconnectionSubscriptionRef.current = subscribeToEsp32Disconnection(
@@ -317,16 +325,24 @@ export function InstructorScheduleDetail({
         (message) => {
           connectedDeviceIdRef.current = null;
           setEsp32Connected(false);
+          setEsp32DeviceInfo(null);
           setEsp32ConnectionLabel(null);
           if (message) setError(message);
         },
       );
       setEsp32Connected(true);
+      setEsp32DeviceInfo(info);
       setSelectedBeacon({ ...beacon, beaconId: info.device_id });
       setEsp32ConnectionLabel(
         `${device.localName ?? device.name ?? device.id} - ${info.device_id}`,
       );
     } catch (connectError) {
+      logError("attendance.ble.connect", connectError, {
+        scheduleId,
+        scheduleRoomId,
+        blePeripheralId: beacon.id,
+        advertisedName: beacon.name,
+      });
       const message =
         connectError instanceof Error
           ? connectError.message
@@ -338,7 +354,12 @@ export function InstructorScheduleDetail({
   }
 
   async function handleStartSession() {
-    if (!canSubmit || scheduleId === null || periodId === null) return;
+    if (
+      !canSubmit ||
+      scheduleId === null ||
+      scheduleRoomId === null ||
+      !esp32DeviceInfo
+    ) return;
 
     setIsSubmitting(true);
     setError(null);
@@ -355,34 +376,43 @@ export function InstructorScheduleDetail({
 
       const response = await createAttendanceSession({
         schedule_id: scheduleId,
-        period_id: periodId,
+        device_id: esp32DeviceInfo.device_id,
         verification_mode: verificationMode,
-        ble_source_type: payloadBleSource,
-        beacon_id: selectedBeaconId,
-        requires_periodic_verification: requiresPeriodicVerification,
+        continuous_checking: requiresPeriodicVerification,
+        requested_duration_minutes: selectedDurationMinutes,
       });
 
+      const session = response.data.session;
       const beaconConfiguration = response.data.beacon_configuration;
-      if (!beaconConfiguration) {
-        setCreatedSession(response.data.session);
-        throw new Error(
-          "The attendance session was created, but Laravel did not return data.beacon_configuration for the ESP32.",
-        );
-      }
+      setCreatedSession(session);
+      const startSessionCommand = {
+        command: "START_SESSION" as const,
+        ...beaconConfiguration,
+      };
 
       disconnectionSubscriptionRef.current?.remove();
       disconnectionSubscriptionRef.current = null;
       await configureEsp32Attendance(
         connectedDeviceIdRef.current,
-        beaconConfiguration,
+        startSessionCommand,
       );
+      await disconnectFromEsp32Beacon(connectedDeviceIdRef.current);
       connectedDeviceIdRef.current = null;
       setEsp32Connected(false);
+      setEsp32DeviceInfo(null);
       setEsp32Advertising(true);
       setEsp32ConnectionLabel("ESP32 is broadcasting rotating attendance tokens");
-      setCreatedSession(response.data.session);
       Alert.alert("Attendance started", response.message);
     } catch (startError) {
+      logError("attendance.session.start", startError, {
+        scheduleId,
+        scheduleRoomId,
+        deviceId: esp32DeviceInfo?.device_id,
+        deviceRoomId: esp32DeviceInfo?.room_id,
+        verificationMode,
+        continuousChecking: requiresPeriodicVerification,
+        requestedDurationMinutes: selectedDurationMinutes,
+      });
       const message =
         startError instanceof Error
           ? startError.message
@@ -462,6 +492,7 @@ export function InstructorScheduleDetail({
           }
           setSelectedBeacon(beacon);
           setEsp32Connected(false);
+          setEsp32DeviceInfo(null);
           setEsp32Advertising(false);
           setEsp32ConnectionLabel(null);
         }}
@@ -747,11 +778,7 @@ export function InstructorScheduleDetail({
 
           <Pressable
             accessibilityRole="button"
-            disabled={
-              isConnectingEsp32 ||
-              !selectedBeacon ||
-              !selectedBeacon.isRecommended
-            }
+            disabled={isConnectingEsp32 || !selectedBeacon}
             onPress={() => {
               void handleConnectEsp32();
             }}
@@ -782,9 +809,7 @@ export function InstructorScheduleDetail({
                   : esp32Connected
                     ? "Successfully connected to ESP32 BLE beacon"
                     : selectedBeacon
-                      ? selectedBeacon.isRecommended
-                        ? `Connect to ${selectedBeacon.name}`
-                        : `Select ${schedule.room ?? "room"} beacon to connect`
+                      ? `Connect to ${selectedBeacon.name}`
                       : "Select a detected ESP32 beacon"}
               </Text>
               {esp32ConnectionLabel ? (
@@ -861,19 +886,13 @@ export function InstructorScheduleDetail({
             className="mt-2 text-sm font-bold"
             style={{ color: theme.colors.textMuted }}
           >
-            Source:{" "}
-            {createdSession.ble_source_type === "instructor_phone"
-              ? "Instructor phone"
-              : createdSession.ble_source_type === "room_beacon"
-                ? "Schedule room BLE"
-                : "None"}
+            Mode: {createdSession.verification_mode.replaceAll("_", " + ")}
           </Text>
           <Text
             className="mt-1 text-sm font-bold"
             style={{ color: theme.colors.textMuted }}
           >
-            Token expires:{" "}
-            {formatDateTimeInManila(createdSession.ble_token_expires_at)}
+            Session expires: {formatDateTimeInManila(createdSession.end_at)}
           </Text>
         </View>
       ) : null}
