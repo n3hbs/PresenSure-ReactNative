@@ -19,8 +19,14 @@ export type Esp32BeaconConfiguration = {
   advertisement_interval_ms: number;
 };
 
-export type Esp32StartSessionCommand = Esp32BeaconConfiguration & {
+export type Esp32StartSessionCommand = {
   command: 'START_SESSION';
+  session_id: string;
+  schedule_id: number;
+  subject_code: string;
+  room_code: string;
+  token: string;
+  expires_at: number;
 };
 
 export type AttendanceSession = {
@@ -46,29 +52,24 @@ export type AttendanceSessionResponse = {
   message: string;
   data: {
     session: AttendanceSession;
+    session_id?: string | number;
     ble_token: string;
-    beacon_configuration: Esp32BeaconConfiguration;
+    expires_at_timestamp?: number;
+    beacon_configuration?: Esp32BeaconConfiguration;
   };
 };
 
-export type LegacyEsp32ConfigurationStatus = {
-  code: number;
-  status: string;
-  active: boolean;
-  configured?: boolean;
-  epoch?: number;
-};
-
-export type Esp32SessionStatus = {
-  success: boolean;
+export type Esp32ConfigurationStatus = {
+  status:
+    | 'READY'
+    | 'AUTHENTICATED'
+    | 'SESSION_STARTED'
+    | 'SESSION_STOPPED'
+    | 'ERROR'
+    | string;
+  success?: boolean;
   session_id?: string;
-  device_id?: string;
-  advertising: boolean;
-  started_at?: number;
-  error_code?: string | null;
+  room_code?: string;
+  code?: string;
   message?: string;
 };
-
-export type Esp32ConfigurationStatus =
-  | LegacyEsp32ConfigurationStatus
-  | Esp32SessionStatus;

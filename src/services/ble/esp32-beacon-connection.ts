@@ -10,6 +10,8 @@ import {
 import { Platform } from "react-native";
 
 import { requestPresenSurePermission } from "@/features/permissions/permission-service";
+import { decodeBlePayload, encodeBlePayload } from "@/services/ble/ble-encoding";
+import { PRESENSURE_BLE } from "@/services/ble/presensure-ble-protocol";
 import type {
   Esp32ConfigurationStatus,
   Esp32StartSessionCommand,
@@ -20,10 +22,6 @@ const SCAN_TIMEOUT_MS = 8_000;
 const ADAPTER_STATE_TIMEOUT_MS = 5_000;
 const CONNECTION_TIMEOUT_MS = 12_000;
 const CONFIGURATION_ACK_TIMEOUT_MS = 10_000;
-const PRESENSURE_SERVICE_UUID = "76b50000-a1b2-c3d4-e5f6-1234567890ab";
-const DEVICE_INFO_CHARACTERISTIC_UUID = "76b50001-a1b2-c3d4-e5f6-1234567890ab";
-const CONFIGURATION_CHARACTERISTIC_UUID = "76b50002-a1b2-c3d4-e5f6-1234567890ab";
-const STATUS_CHARACTERISTIC_UUID = "76b50005-a1b2-c3d4-e5f6-1234567890ab";
 const manager = new BleManager();
 
 export type DetectedEsp32Beacon = {
@@ -34,69 +32,32 @@ export type DetectedEsp32Beacon = {
   isRecommended: boolean;
 };
 
-export type Esp32DeviceInfo = {
-  device_id: string;
-  device_name: string;
-  room_id: number;
-  provisioned: boolean;
-  device_status: string;
-};
-
 export type ConnectedEsp32Beacon = {
   device: Device;
-  info: Esp32DeviceInfo;
 };
-
-function bytesToBase64(value: string) {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-function base64ToText(value: string) {
-  const binary = atob(value);
-  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
 
 function parseJsonCharacteristic<T>(value: string | null, label: string): T {
   if (!value) throw new Error(`${label} returned an empty value.`);
   try {
-    return JSON.parse(base64ToText(value)) as T;
+    return decodeBlePayload<T>(value);
   } catch {
     throw new Error(`${label} returned invalid JSON.`);
   }
 }
 
-function validateDeviceInfo(value: Esp32DeviceInfo) {
-  if (
-    !value.device_id ||
-    !value.device_name ||
-    !Number.isInteger(value.room_id) ||
-    value.room_id < 1 ||
-    value.provisioned !== true ||
-    value.device_status !== "ready"
-  ) {
-    throw new Error("The ESP32 returned unsupported device information.");
-  }
-  return value;
-}
-
 function validateConfiguration(configuration: Esp32StartSessionCommand) {
   if (
     configuration.command !== "START_SESSION" ||
-    !configuration.session_code ||
-    ![1, 2, 3].includes(configuration.attendance_type) ||
-    typeof configuration.continuous !== "boolean" ||
-    !configuration.rotating_secret ||
-    !configuration.signature ||
-    configuration.start_time < 1_609_459_200 ||
-    configuration.end_time <= configuration.start_time ||
-    configuration.advertisement_interval_ms < 100 ||
-    configuration.advertisement_interval_ms > 5_000
+    !configuration.session_id ||
+    !Number.isInteger(configuration.schedule_id) ||
+    configuration.schedule_id < 1 ||
+    !configuration.subject_code ||
+    !configuration.room_code ||
+    !configuration.token ||
+    !Number.isInteger(configuration.expires_at) ||
+    configuration.expires_at <= Math.floor(Date.now() / 1000)
   ) {
-    throw new Error("Laravel returned an invalid ESP32 beacon configuration.");
+    throw new Error("The attendance session contains invalid ESP32 configuration data.");
   }
 }
 
@@ -257,7 +218,7 @@ export async function scanForEsp32Beacons(scheduleRoom?: string | null) {
       );
     }, SCAN_TIMEOUT_MS);
 
-    manager.startDeviceScan([PRESENSURE_SERVICE_UUID], null, (scanError, device) => {
+    manager.startDeviceScan([PRESENSURE_BLE.serviceUuid], null, (scanError, device) => {
       if (settled) return;
 
       if (scanError) {
@@ -291,6 +252,7 @@ export async function connectToEsp32Beacon(deviceId: string) {
       : await manager.connectToDevice(deviceId, {
           autoConnect: false,
           requestMTU: 517,
+          refreshGatt: Platform.OS === "android" ? "OnConnected" : undefined,
           timeout: CONNECTION_TIMEOUT_MS,
         });
 
@@ -299,18 +261,43 @@ export async function connectToEsp32Beacon(deviceId: string) {
     }
 
     const discoveredDevice = await connectedDevice.discoverAllServicesAndCharacteristics();
-    const deviceInfoCharacteristic = await discoveredDevice.readCharacteristicForService(
-      PRESENSURE_SERVICE_UUID,
-      DEVICE_INFO_CHARACTERISTIC_UUID,
-    );
-    const info = validateDeviceInfo(
-      parseJsonCharacteristic<Esp32DeviceInfo>(
-        deviceInfoCharacteristic.value,
-        "ESP32 device information",
-      ),
+    const services = await discoveredDevice.services();
+    const discoveredServiceUuids = services.map((service) => service.uuid.toLowerCase());
+    console.log("[PresenSure:ble-services]", {
+      blePeripheralId: deviceId,
+      services: discoveredServiceUuids,
+    });
+
+    const presenSureService = services.find(
+      (service) => service.uuid.toLowerCase() === PRESENSURE_BLE.serviceUuid,
     );
 
-    return { device: discoveredDevice, info } satisfies ConnectedEsp32Beacon;
+    if (!presenSureService) {
+      throw new Error(
+        `ESP32 advertised PresenSure but its GATT table does not contain ${PRESENSURE_BLE.serviceUuid}. ` +
+          `Discovered services: ${discoveredServiceUuids.join(", ") || "none"}.`,
+      );
+    }
+
+    const characteristics = await presenSureService.characteristics();
+    const characteristicUuids = new Set(
+      characteristics.map((characteristic) => characteristic.uuid.toLowerCase()),
+    );
+    console.log("[PresenSure:ble-characteristics]", {
+      blePeripheralId: deviceId,
+      serviceUuid: presenSureService.uuid,
+      characteristics: [...characteristicUuids],
+    });
+    const requiredUuids = Object.values(PRESENSURE_BLE.characteristics);
+
+    if (requiredUuids.some((uuid) => !characteristicUuids.has(uuid))) {
+      const missingUuids = requiredUuids.filter((uuid) => !characteristicUuids.has(uuid));
+      throw new Error(
+        `The ESP32 PresenSure service is missing characteristics: ${missingUuids.join(", ")}.`,
+      );
+    }
+
+    return { device: discoveredDevice } satisfies ConnectedEsp32Beacon;
   } catch (error) {
     logError("ble.connect", error, { blePeripheralId: deviceId });
     if (await manager.isDeviceConnected(deviceId).catch(() => false)) {
@@ -329,79 +316,72 @@ export async function configureEsp32Attendance(
     throw new Error("The ESP32 disconnected before it could be configured.");
   }
 
-  const configurationJson = JSON.stringify(configuration);
-  const encodedConfiguration = bytesToBase64(configurationJson);
+  type ExpectedStatus = "READY" | "AUTHENTICATED" | "SESSION_STARTED";
+  type StatusWaiter = {
+    expected: ExpectedStatus;
+    resolve: (status: Esp32ConfigurationStatus) => void;
+    reject: (error: Error) => void;
+  };
 
-  return new Promise<Esp32ConfigurationStatus>((resolve, reject) => {
-    let settled = false;
-    let writeStarted = false;
-    let statusSubscription: Subscription | null = null;
-    let disconnectSubscription: Subscription | null = null;
+  let active = true;
+  const statusState: { last: Esp32ConfigurationStatus | null } = { last: null };
+  let monitoringError: Error | null = null;
+  let waiter: StatusWaiter | null = null;
+  let statusSubscription: Subscription | null = null;
+  let disconnectSubscription: Subscription | null = null;
 
-    const finish = (
-      error: Error | null,
-      status?: Esp32ConfigurationStatus,
-    ) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      statusSubscription?.remove();
-      disconnectSubscription?.remove();
-      if (error) {
-        logError("ble.session-command", error, {
-          blePeripheralId: deviceId,
-          sessionCode: configuration.session_code,
-        });
-        reject(error);
-      }
-      else if (status) resolve(status);
-    };
-
-    const timeout = setTimeout(() => {
-      finish(
-        new Error(
-          "The ESP32 did not acknowledge the session configuration. Check its serial monitor.",
-        ),
+  function waitForStatus(expected: ExpectedStatus) {
+    if (statusState.last?.status === expected) return Promise.resolve(statusState.last);
+    if (monitoringError) return Promise.reject(monitoringError);
+    if (waiter) {
+      return Promise.reject(
+        new Error(`Already waiting for ESP32 status ${waiter.expected}.`),
       );
-    }, CONFIGURATION_ACK_TIMEOUT_MS);
+    }
 
-    const handleStatus = (status: Esp32ConfigurationStatus) => {
-      if ("code" in status) {
-        if (status.code === 0 && status.status === "OK" && status.active) {
-          finish(null, status);
-        } else if (status.status !== "NO_ACTIVE_SESSION") {
-          finish(
-            new Error(
-              `ESP32 rejected the session configuration: ${status.status || `code ${status.code}`}.`,
-            ),
-          );
-        }
-        return;
-      }
+    return new Promise<Esp32ConfigurationStatus>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        waiter = null;
+        reject(new Error(`The ESP32 did not return ${expected}. Check its serial monitor.`));
+      }, CONFIGURATION_ACK_TIMEOUT_MS);
 
-      if (status.success && status.advertising) {
-        finish(null, status);
-      } else if (!status.success) {
-        finish(
-          new Error(
-            status.message ||
-              `ESP32 rejected the session command: ${status.error_code || "UNKNOWN_ERROR"}.`,
-          ),
-        );
-      }
-    };
+      waiter = {
+        expected,
+        resolve: (status) => {
+          clearTimeout(timeout);
+          waiter = null;
+          resolve(status);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          waiter = null;
+          reject(error);
+        },
+      };
+    });
+  }
 
+  function rejectWaiter(error: Error) {
+    monitoringError = error;
+    waiter?.reject(error);
+  }
+
+  try {
     disconnectSubscription = manager.onDeviceDisconnected(deviceId, (error) => {
-      finish(formatBleError(error, "The ESP32 disconnected before confirming advertising."));
+      if (!active) return;
+      rejectWaiter(
+        formatBleError(error, "The ESP32 disconnected before confirming the session."),
+      );
     });
 
     statusSubscription = manager.monitorCharacteristicForDevice(
       deviceId,
-      PRESENSURE_SERVICE_UUID,
-      STATUS_CHARACTERISTIC_UUID,
+      PRESENSURE_BLE.serviceUuid,
+      PRESENSURE_BLE.characteristics.status,
       (error, characteristic) => {
+        if (!active) return;
         if (error) {
-          finish(
+          rejectWaiter(
             formatBleError(
               error,
               "Unable to subscribe to ESP32 session status notifications.",
@@ -409,32 +389,90 @@ export async function configureEsp32Attendance(
           );
           return;
         }
-        if (!writeStarted || !characteristic?.value) return;
+        if (!characteristic?.value) return;
 
         try {
           const status = parseJsonCharacteristic<Esp32ConfigurationStatus>(
             characteristic.value,
             "ESP32 status",
           );
-          handleStatus(status);
+          statusState.last = status;
+          console.log("[PresenSure:ble-status]", {
+            status: status.status,
+            code: status.code,
+            message: status.message,
+          });
+
+          if (status.status === "ERROR") {
+            waiter?.reject(
+              new Error(
+                status.message ||
+                  `ESP32 rejected the BLE command: ${status.code || "UNKNOWN_ERROR"}.`,
+              ),
+            );
+          } else if (waiter?.expected === status.status) {
+            waiter.resolve(status);
+          }
         } catch (error) {
-          finish(error instanceof Error ? error : new Error("Invalid ESP32 status response."));
+          rejectWaiter(
+            error instanceof Error
+              ? error
+              : new Error("Invalid ESP32 status response."),
+          );
         }
       },
     );
 
-    writeStarted = true;
-    manager
-      .writeCharacteristicWithResponseForDevice(
+    await waitForStatus("READY");
+
+    const encodedAuthentication = encodeBlePayload({
+      command: "AUTHENTICATE",
+      secret: PRESENSURE_BLE.developmentSecret,
+    });
+    const authenticationResult = waitForStatus("AUTHENTICATED");
+    try {
+      await manager.writeCharacteristicWithResponseForDevice(
         deviceId,
-        PRESENSURE_SERVICE_UUID,
-        CONFIGURATION_CHARACTERISTIC_UUID,
-        encodedConfiguration,
-      )
-      .catch((error) => {
-        finish(formatBleError(error, "Unable to write the session configuration to the ESP32."));
-      });
-  });
+        PRESENSURE_BLE.serviceUuid,
+        PRESENSURE_BLE.characteristics.authentication,
+        encodedAuthentication,
+      );
+    } catch (error) {
+      rejectWaiter(formatBleError(error, "Unable to authenticate with the ESP32."));
+    }
+    await authenticationResult;
+
+    const encodedSession = encodeBlePayload({
+      ...configuration,
+      issued_at: Math.floor(Date.now() / 1000),
+    });
+    const sessionResult = waitForStatus("SESSION_STARTED");
+    try {
+      await manager.writeCharacteristicWithResponseForDevice(
+        deviceId,
+        PRESENSURE_BLE.serviceUuid,
+        PRESENSURE_BLE.characteristics.session,
+        encodedSession,
+      );
+    } catch (error) {
+      rejectWaiter(
+        formatBleError(error, "Unable to send the session configuration to the ESP32."),
+      );
+    }
+
+    return await sessionResult;
+  } catch (error) {
+    const formattedError = formatBleError(error, "Unable to configure the ESP32 session.");
+    logError("ble.session-command", formattedError, {
+      blePeripheralId: deviceId,
+      lastStatus: statusState.last?.status,
+    });
+    throw formattedError;
+  } finally {
+    active = false;
+    statusSubscription?.remove();
+    disconnectSubscription?.remove();
+  }
 }
 
 export function subscribeToEsp32Disconnection(
