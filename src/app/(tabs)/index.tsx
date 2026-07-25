@@ -1,4 +1,5 @@
 import { router } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
   Bell,
@@ -6,7 +7,7 @@ import {
   CalendarX,
   Home,
 } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -369,12 +370,24 @@ function ScheduleCard({
 export default function HomeScreen() {
   const theme = useAppTheme();
   const { user } = useAuth();
-  const [schedules, setSchedules] = useState<CourseSchedule[]>([]);
   const [activeTab, setActiveTab] = useState<ScheduleTab>("today");
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const userId = user?.user_id;
+  const {
+    data: schedules = [],
+    error: schedulesError,
+    isLoading,
+    isRefetching,
+    refetch,
+  } = useQuery({
+    queryKey: ["course-schedules", userId],
+    queryFn: () => getCourseSchedules(String(userId)),
+    enabled: userId !== null && userId !== undefined,
+  });
+  const error = schedulesError
+    ? schedulesError instanceof Error
+      ? schedulesError.message
+      : "Unable to load course schedules."
+    : null;
 
   const profileImageUri =
     user?.profile?.imagelink ??
@@ -419,44 +432,9 @@ export default function HomeScreen() {
     });
   }, [activeTab, schedules]);
 
-  const loadSchedules = useCallback(async () => {
-    if (!userId) return;
-
-    setError(null);
-    const nextSchedules = await getCourseSchedules(userId);
-    setSchedules(nextSchedules);
-  }, [userId]);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      loadSchedules()
-        .catch((loadError) => {
-          const message =
-            loadError instanceof Error
-              ? loadError.message
-              : "Unable to load course schedules.";
-          setError(message);
-        })
-        .finally(() => setIsLoading(false));
-    }, 0);
-
-    return () => clearTimeout(timeout);
-  }, [loadSchedules]);
-
-  const handleRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-    try {
-      await loadSchedules();
-    } catch (refreshError) {
-      const message =
-        refreshError instanceof Error
-          ? refreshError.message
-          : "Unable to refresh schedules.";
-      setError(message);
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [loadSchedules]);
+  const handleRefresh = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   return (
     <SafeAreaView
@@ -622,7 +600,7 @@ export default function HomeScreen() {
             ItemSeparatorComponent={() => <View style={{ height: 22 }} />}
             refreshControl={
               <RefreshControl
-                refreshing={isRefreshing}
+                refreshing={isRefetching}
                 onRefresh={handleRefresh}
                 tintColor={theme.colors.primary}
               />

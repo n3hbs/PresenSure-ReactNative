@@ -2,8 +2,12 @@ import { isAxiosError } from "axios";
 
 import { apiClient } from "@/api/client";
 import type {
+  ActiveAttendanceSessionResponse,
+  AttendanceSession,
   AttendanceSessionRequest,
   AttendanceSessionResponse,
+  StopAttendanceSessionRequest,
+  StopAttendanceSessionResponse,
 } from "@/types/attendance-session";
 import { logError } from "@/utils/logger";
 
@@ -68,6 +72,58 @@ export async function createAttendanceSession(
         typeof error.response?.data?.message === "string"
           ? error.response.data.message
           : "Unable to start attendance session.";
+      throw new Error(message);
+    }
+
+    throw error;
+  }
+}
+
+export async function getActiveAttendanceSession(
+  scheduleId: number,
+): Promise<AttendanceSession | null> {
+  try {
+    const response = await apiClient.get<ActiveAttendanceSessionResponse>(
+      "api/attendance-session/active",
+      { params: { schedule_id: scheduleId } },
+    );
+
+    return response.data.data;
+  } catch (error) {
+    if (isAxiosError(error)) {
+      const message =
+        typeof error.response?.data?.message === "string"
+          ? error.response.data.message
+          : "Unable to check for an active attendance session.";
+      throw new Error(message);
+    }
+
+    throw error;
+  }
+}
+
+export async function stopAttendanceSession(
+  payload: StopAttendanceSessionRequest,
+): Promise<StopAttendanceSessionResponse> {
+  try {
+    const response = await apiClient.put<StopAttendanceSessionResponse>(
+      "api/attendance-session",
+      payload,
+    );
+
+    if (!response.data.success || !response.data.data) {
+      throw new Error(
+        response.data.message || "No active attendance session was found.",
+      );
+    }
+
+    return response.data;
+  } catch (error) {
+    if (isAxiosError(error)) {
+      const message =
+        typeof error.response?.data?.message === "string"
+          ? error.response.data.message
+          : "Unable to stop the attendance session.";
       throw new Error(message);
     }
 

@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -11,6 +12,7 @@ import {
 } from "react-native";
 
 import { useAppTheme } from "@/app/providers/theme-provider";
+import { attendanceSessionQueryKeys } from "@/features/attendance/attendance-session-query-keys";
 import { Esp32BeaconPickerModal } from "@/features/attendance/components/esp32-beacon-picker-modal";
 import {
   createAttendanceSession,
@@ -25,10 +27,7 @@ import {
   subscribeToEsp32Disconnection,
   type DetectedEsp32Beacon,
 } from "@/services/ble/esp32-beacon-connection";
-import type {
-  AttendanceSession,
-  VerificationMode,
-} from "@/types/attendance-session";
+import type { VerificationMode } from "@/types/attendance-session";
 import type { CourseSchedule } from "@/types/course-schedule";
 import {
   formatDateTimeInManila,
@@ -114,6 +113,7 @@ export function InstructorScheduleDetail({
   schedule: CourseSchedule;
 }) {
   const theme = useAppTheme();
+  const queryClient = useQueryClient();
   const [verificationMode, setVerificationMode] =
     useState<VerificationMode>("ble_face");
   const [detectedBeacons, setDetectedBeacons] = useState<DetectedEsp32Beacon[]>(
@@ -136,9 +136,10 @@ export function InstructorScheduleDetail({
   const [durationMinutes, setDurationMinutes] = useState<number | null>(null);
   const [durationInput, setDurationInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [createdSession, setCreatedSession] =
-    useState<AttendanceSession | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const createSessionMutation = useMutation({
+    mutationFn: createAttendanceSession,
+  });
   const connectedDeviceIdRef = useRef<string | null>(null);
   const disconnectionSubscriptionRef = useRef<{ remove: () => void } | null>(null);
 
@@ -358,7 +359,7 @@ export function InstructorScheduleDetail({
         throw new Error("The ESP32 disconnected. Connect it again before starting attendance.");
       }
 
-      const response = await createAttendanceSession({
+      const response = await createSessionMutation.mutateAsync({
         schedule_id: scheduleId,
         device_id: selectedBeacon.beaconId,
         verification_mode: verificationMode,
@@ -396,8 +397,11 @@ export function InstructorScheduleDetail({
       connectedDeviceIdRef.current = null;
       setEsp32Connected(false);
       setEsp32Advertising(true);
-      setCreatedSession(session);
       setEsp32ConnectionLabel("ESP32 is broadcasting rotating attendance tokens");
+      queryClient.setQueryData(
+        attendanceSessionQueryKeys.active(scheduleId),
+        session,
+      );
       Alert.alert("Attendance started", response.message);
     } catch (startError) {
       logError("attendance.session.start", startError, {
@@ -875,34 +879,6 @@ export function InstructorScheduleDetail({
         </Pressable>
       </View>
 
-      {createdSession ? (
-        <View
-          className="rounded-[20px] border p-5"
-          style={{
-            backgroundColor: theme.colors.surface,
-            borderColor: theme.colors.border,
-          }}
-        >
-          <Text
-            className="text-base font-black"
-            style={{ color: theme.colors.text }}
-          >
-            Active Session #{createdSession.attendance_session_id}
-          </Text>
-          <Text
-            className="mt-2 text-sm font-bold"
-            style={{ color: theme.colors.textMuted }}
-          >
-            Mode: {createdSession.verification_mode.replaceAll("_", " + ")}
-          </Text>
-          <Text
-            className="mt-1 text-sm font-bold"
-            style={{ color: theme.colors.textMuted }}
-          >
-            Session expires: {formatDateTimeInManila(createdSession.end_at)}
-          </Text>
-        </View>
-      ) : null}
     </View>
   );
 }

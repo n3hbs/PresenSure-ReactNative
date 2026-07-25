@@ -15,6 +15,7 @@ import { PRESENSURE_BLE } from "@/services/ble/presensure-ble-protocol";
 import type {
   Esp32ConfigurationStatus,
   Esp32StartSessionCommand,
+  Esp32StopSessionCommand,
 } from "@/types/attendance-session";
 import { logError } from "@/utils/logger";
 
@@ -58,6 +59,17 @@ function validateConfiguration(configuration: Esp32StartSessionCommand) {
     configuration.expires_at <= Math.floor(Date.now() / 1000)
   ) {
     throw new Error("The attendance session contains invalid ESP32 configuration data.");
+  }
+}
+
+function validateStopCommand(command: Esp32StopSessionCommand) {
+  if (
+    command.command !== "STOP_SESSION" ||
+    !command.session_id ||
+    !Number.isInteger(command.schedule_id) ||
+    command.schedule_id < 1
+  ) {
+    throw new Error("The stop command contains invalid ESP32 session data.");
   }
 }
 
@@ -307,18 +319,22 @@ export async function connectToEsp32Beacon(deviceId: string) {
   }
 }
 
-export async function configureEsp32Attendance(
+async function sendEsp32SessionCommand(
   deviceId: string,
-  configuration: Esp32StartSessionCommand,
+  configuration: Esp32StartSessionCommand | Esp32StopSessionCommand,
+  expectedSessionStatus: "SESSION_STARTED" | "SESSION_STOPPED",
 ) {
-  validateConfiguration(configuration);
   if (!(await manager.isDeviceConnected(deviceId))) {
     throw new Error("The ESP32 disconnected before it could be configured.");
   }
 
-  type ExpectedStatus = "READY" | "AUTHENTICATED" | "SESSION_STARTED";
+  type ExpectedStatus =
+    | "READY"
+    | "AUTHENTICATED"
+    | "SESSION_STARTED"
+    | "SESSION_STOPPED";
   type StatusWaiter = {
-    expected: ExpectedStatus;
+    expected: ExpectedStatus[];
     resolve: (status: Esp32ConfigurationStatus) => void;
     reject: (error: Error) => void;
   };
@@ -330,23 +346,33 @@ export async function configureEsp32Attendance(
   let statusSubscription: Subscription | null = null;
   let disconnectSubscription: Subscription | null = null;
 
-  function waitForStatus(expected: ExpectedStatus) {
-    if (statusState.last?.status === expected) return Promise.resolve(statusState.last);
+  function waitForStatus(expected: ExpectedStatus | ExpectedStatus[]) {
+    const expectedStatuses = Array.isArray(expected) ? expected : [expected];
+    if (
+      statusState.last &&
+      expectedStatuses.includes(statusState.last.status as ExpectedStatus)
+    ) {
+      return Promise.resolve(statusState.last);
+    }
     if (monitoringError) return Promise.reject(monitoringError);
     if (waiter) {
       return Promise.reject(
-        new Error(`Already waiting for ESP32 status ${waiter.expected}.`),
+        new Error(`Already waiting for ESP32 status ${waiter.expected.join(" or ")}.`),
       );
     }
 
     return new Promise<Esp32ConfigurationStatus>((resolve, reject) => {
       const timeout = setTimeout(() => {
         waiter = null;
-        reject(new Error(`The ESP32 did not return ${expected}. Check its serial monitor.`));
+        reject(
+          new Error(
+            `The ESP32 did not return ${expectedStatuses.join(" or ")}. Check its serial monitor.`,
+          ),
+        );
       }, CONFIGURATION_ACK_TIMEOUT_MS);
 
       waiter = {
-        expected,
+        expected: expectedStatuses,
         resolve: (status) => {
           clearTimeout(timeout);
           waiter = null;
@@ -410,7 +436,9 @@ export async function configureEsp32Attendance(
                   `ESP32 rejected the BLE command: ${status.code || "UNKNOWN_ERROR"}.`,
               ),
             );
-          } else if (waiter?.expected === status.status) {
+          } else if (
+            waiter?.expected.includes(status.status as ExpectedStatus)
+          ) {
             waiter.resolve(status);
           }
         } catch (error) {
@@ -423,7 +451,11 @@ export async function configureEsp32Attendance(
       },
     );
 
-    await waitForStatus("READY");
+    await waitForStatus(
+      configuration.command === "STOP_SESSION"
+        ? ["READY", "SESSION_STARTED", "SESSION_STOPPED"]
+        : "READY",
+    );
 
     const encodedAuthentication = encodeBlePayload({
       command: "AUTHENTICATE",
@@ -446,7 +478,7 @@ export async function configureEsp32Attendance(
       ...configuration,
       issued_at: Math.floor(Date.now() / 1000),
     });
-    const sessionResult = waitForStatus("SESSION_STARTED");
+    const sessionResult = waitForStatus(expectedSessionStatus);
     try {
       await manager.writeCharacteristicWithResponseForDevice(
         deviceId,
@@ -473,6 +505,22 @@ export async function configureEsp32Attendance(
     statusSubscription?.remove();
     disconnectSubscription?.remove();
   }
+}
+
+export async function configureEsp32Attendance(
+  deviceId: string,
+  configuration: Esp32StartSessionCommand,
+) {
+  validateConfiguration(configuration);
+  return sendEsp32SessionCommand(deviceId, configuration, "SESSION_STARTED");
+}
+
+export async function stopEsp32Attendance(
+  deviceId: string,
+  command: Esp32StopSessionCommand,
+) {
+  validateStopCommand(command);
+  return sendEsp32SessionCommand(deviceId, command, "SESSION_STOPPED");
 }
 
 export function subscribeToEsp32Disconnection(

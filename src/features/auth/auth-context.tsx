@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 
@@ -31,6 +32,7 @@ function getDeviceStatus(device: RegisteredDevice | null): DeviceRegistrationSta
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [session, setSession] = useState<AuthSession | null>(null);
   const [registeredDevice, setRegisteredDevice] = useState<RegisteredDevice | null>(null);
   const [deviceRegistrationStatus, setDeviceRegistrationStatus] =
@@ -77,11 +79,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     await clearStoredSession();
     await clearDeviceRegistration();
+    queryClient.clear();
     setAuthToken(null);
     setSession(null);
     setRegisteredDevice(null);
     setDeviceRegistrationStatus('unregistered');
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     const interceptorId = apiClient.interceptors.response.use(

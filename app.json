@@ -67,7 +67,9 @@
           "neverForLocation": false,
           "bluetoothAlwaysPermission": "Allow PresenSure to discover nearby Bluetooth devices."
         }
-      ]
+      ],
+      "expo-image",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

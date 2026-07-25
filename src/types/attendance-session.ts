@@ -29,6 +29,12 @@ export type Esp32StartSessionCommand = {
   expires_at: number;
 };
 
+export type Esp32StopSessionCommand = {
+  command: 'STOP_SESSION';
+  session_id: string;
+  schedule_id: number;
+};
+
 export type AttendanceSession = {
   attendance_session_id: number;
   session_code: string;
@@ -45,7 +51,29 @@ export type AttendanceSession = {
   device_started_at: string | null;
   created_at: string;
   updated_at: string;
-  ble_broadcast_token: string;
+  ble_broadcast_token?: string;
+};
+
+export type ActiveAttendanceSessionResponse = {
+  data: AttendanceSession | null;
+};
+
+export type StopAttendanceSessionRequest = {
+  attendance_session_id: number;
+  schedule_id: number;
+};
+
+export type StoppedAttendanceSession = {
+  attendance_session_id: number;
+  schedule_id: number;
+  status: 'ended' | string;
+  end_at: string;
+};
+
+export type StopAttendanceSessionResponse = {
+  success: boolean;
+  message: string;
+  data: StoppedAttendanceSession | null;
 };
 
 export type AttendanceSessionResponse = {
