@@ -12,7 +12,7 @@ import {
 } from 'lucide-react-native';
 import { useMemo } from 'react';
 import { Image, Pressable, ScrollView, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppTheme } from '@/app/providers/theme-provider';
 import { useAuth } from '@/context/auth-context';
@@ -30,6 +30,7 @@ function getProfileImageUri(user: ReturnType<typeof useAuth>['user']) {
 
 export default function ProfileScreen() {
   const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { signOut, user } = useAuth();
 
   const displayName = useMemo(() => {
@@ -197,19 +198,20 @@ export default function ProfileScreen() {
             Saved on this device for offline viewing
           </Text>
         </View>
+
       </ScrollView>
 
-      <View style={{ backgroundColor: theme.colors.background, padding: 16, paddingBottom: 28 }}>
+      <View
+        className="px-4 pt-3"
+        style={{
+          backgroundColor: theme.colors.background,
+          paddingBottom: Math.max(insets.bottom, 16),
+        }}>
         <Pressable
           accessibilityLabel="Logout"
           accessibilityRole="button"
           onPress={handleLogout}
-          className="min-h-[52px] flex-row items-center justify-center gap-2 rounded-2xl"
-          style={({ pressed }) => ({
-            backgroundColor: '#DC2626',
-            borderRadius: 16,
-            opacity: pressed ? 0.78 : 1,
-          })}>
+          className="min-h-14 w-full flex-row items-center justify-center gap-2 rounded-2xl border-2 border-red-700 bg-red-600 shadow-lg shadow-red-600/40 active:opacity-80">
           <LogOut size={20} color="#FFFFFF" />
           <Text className="text-base font-black text-white">Logout</Text>
         </Pressable>

@@ -5,12 +5,14 @@ import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
 import { useAppTheme } from "@/app/providers/theme-provider";
 import { attendanceSessionQueryKeys } from "@/features/attendance/attendance-session-query-keys";
+import { showBluetoothOffAlert } from "@/features/attendance/bluetooth-settings-alert";
 import { Esp32BeaconPickerModal } from "@/features/attendance/components/esp32-beacon-picker-modal";
 import { stopAttendanceSession } from "@/services/attendance-session-service";
 import {
   connectToEsp32Beacon,
   disconnectFromEsp32Beacon,
   isEsp32BeaconConnected,
+  isBluetoothPoweredOffError,
   scanForEsp32Beacons,
   stopEsp32Attendance,
   subscribeToEsp32Disconnection,
@@ -30,6 +32,9 @@ export function ActiveAttendanceSessionCard({
 }) {
   const theme = useAppTheme();
   const queryClient = useQueryClient();
+  const normalizedStatus = session.status.trim().toLowerCase();
+  const sessionIsActive = normalizedStatus === "active";
+  const sessionIsEnded = normalizedStatus === "ended";
   const [beacons, setBeacons] = useState<DetectedEsp32Beacon[]>([]);
   const [selectedBeacon, setSelectedBeacon] =
     useState<DetectedEsp32Beacon | null>(null);
@@ -37,6 +42,7 @@ export function ActiveAttendanceSessionCard({
   const [isScanning, setIsScanning] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [hasContinued, setHasContinued] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [connectionLabel, setConnectionLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +64,7 @@ export function ActiveAttendanceSessionCard({
     const deviceId = connectedDeviceIdRef.current;
     connectedDeviceIdRef.current = null;
     setIsConnected(false);
+    setHasContinued(false);
     setConnectionLabel(null);
     if (deviceId) {
       await disconnectFromEsp32Beacon(deviceId).catch(() => undefined);
@@ -91,6 +98,10 @@ export function ActiveAttendanceSessionCard({
           ? scanError.message
           : "Unable to scan for the ESP32 beacon.",
       );
+      if (isBluetoothPoweredOffError(scanError)) {
+        setIsBeaconModalVisible(false);
+        showBluetoothOffAlert();
+      }
     } finally {
       setIsScanning(false);
     }
@@ -111,13 +122,14 @@ export function ActiveAttendanceSessionCard({
         (message) => {
           connectedDeviceIdRef.current = null;
           setIsConnected(false);
+          setHasContinued(false);
           setConnectionLabel(null);
           if (message) setError(message);
         },
       );
       setIsConnected(true);
       setConnectionLabel(
-        `${device.localName ?? device.name ?? "PresenSure ESP32"} - ${device.id}`,
+        device.localName ?? device.name ?? "PresenSure ESP32",
       );
     } catch (connectError) {
       logError("attendance.stop.ble.connect", connectError, {
@@ -129,9 +141,30 @@ export function ActiveAttendanceSessionCard({
           ? connectError.message
           : "Unable to connect to the ESP32 beacon.",
       );
+      if (isBluetoothPoweredOffError(connectError)) {
+        showBluetoothOffAlert();
+      }
     } finally {
       setIsConnecting(false);
     }
+  }
+
+  async function handleContinue() {
+    const deviceId = connectedDeviceIdRef.current;
+    if (!deviceId || !(await isEsp32BeaconConnected(deviceId))) {
+      setIsConnected(false);
+      setHasContinued(false);
+      setConnectionLabel(null);
+      setError("Connect to the active ESP32 beacon before continuing attendance.");
+      return;
+    }
+
+    setError(null);
+    setHasContinued(true);
+    Alert.alert(
+      "Attendance continued",
+      "The attendance controls are ready. No server changes were made.",
+    );
   }
 
   async function handleStop() {
@@ -161,9 +194,14 @@ export function ActiveAttendanceSessionCard({
       });
 
       await disconnectCurrentBeacon();
-      queryClient.setQueryData(
+      queryClient.setQueryData<AttendanceSession>(
         attendanceSessionQueryKeys.active(session.schedule_id),
-        null,
+        {
+          ...session,
+          status: response.data?.status ?? "ended",
+          end_at: response.data?.end_at ?? session.end_at,
+          updated_at: new Date().toISOString(),
+        },
       );
       Alert.alert("Attendance stopped", response.message);
     } catch (stopError) {
@@ -233,14 +271,21 @@ export function ActiveAttendanceSessionCard({
           className="mt-4 text-center text-lg font-black"
           style={{ color: theme.colors.text }}
         >
-          Attendance session already active
+          {hasContinued
+            ? "Attendance session continued"
+            : sessionIsActive
+              ? "Attendance session active"
+              : "Attendance session ended"}
         </Text>
         <Text
           className="mt-2 text-center text-sm font-bold leading-5"
           style={{ color: theme.colors.textMuted }}
         >
-          Connect to the ESP32 currently broadcasting this session before
-          stopping attendance.
+          {hasContinued
+            ? "You can now manage this session and stop attendance when needed."
+            : sessionIsActive
+              ? "Connect to the active ESP32 beacon before stopping attendance."
+              : "Connect to the ESP32 beacon before continuing this attendance session."}
         </Text>
 
         <View
@@ -313,23 +358,62 @@ export function ActiveAttendanceSessionCard({
           </Text>
         </Pressable>
 
-        <Pressable
-          accessibilityRole="button"
-          disabled={!isConnected || isStopping}
-          onPress={confirmStop}
-          className="mt-3 min-h-[50px] w-full flex-row items-center justify-center rounded-md"
-          style={{
-            backgroundColor:
+        {sessionIsEnded && !hasContinued ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={!isConnected || isScanning || isConnecting}
+            onPress={() => void handleContinue()}
+            className={`mt-3 min-h-14 w-full flex-row items-center justify-center rounded-[14px] border-2 ${
+              isConnected && !isScanning && !isConnecting
+                ? "border-blue-700 bg-blue-600 shadow-lg shadow-blue-600/40 active:opacity-80"
+                : "border-slate-300 bg-slate-200 opacity-70"
+            }`}
+          >
+            <Ionicons
+              name="play-circle-outline"
+              size={21}
+              color={isConnected ? "#FFFFFF" : theme.colors.textMuted}
+            />
+            <Text
+              className={`ml-2 text-base font-black ${
+                isConnected ? "text-white" : "text-slate-500"
+              }`}
+            >
+              Continue Attendance
+            </Text>
+          </Pressable>
+        ) : hasContinued ? (
+          <View className="mt-3 w-full flex-row items-center rounded-[14px] bg-emerald-50 p-3">
+            <Ionicons name="checkmark-circle" size={22} color="#16A34A" />
+            <Text className="ml-2 flex-1 text-sm font-black text-emerald-700">
+              Attendance controls are ready
+            </Text>
+          </View>
+        ) : null}
+
+        {sessionIsActive || hasContinued ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={!isConnected || isStopping}
+            onPress={confirmStop}
+            className={`mt-3 min-h-14 w-full flex-row items-center justify-center rounded-[14px] border-2 ${
               isConnected && !isStopping
-                ? theme.colors.danger
-                : theme.colors.border,
-          }}
-        >
-          {isStopping ? <ActivityIndicator color="#FFFFFF" /> : null}
-          <Text className={isStopping ? "ml-2 font-black text-white" : "font-black text-white"}>
-            {isStopping ? "Stopping Attendance" : "Stop Attendance"}
-          </Text>
-        </Pressable>
+                ? "border-red-700 bg-red-600 shadow-lg shadow-red-600/40 active:opacity-80"
+                : "border-slate-300 bg-slate-200 opacity-70"
+            }`}
+          >
+            {isStopping ? <ActivityIndicator color="#FFFFFF" /> : null}
+            <Text
+              className={
+                isStopping
+                  ? "ml-2 text-base font-black text-white"
+                  : "text-base font-black text-white"
+              }
+            >
+              {isStopping ? "Stopping Attendance" : "Stop Attendance"}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );

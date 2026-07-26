@@ -38,6 +38,27 @@ function getScheduleId(schedule: CourseSchedule | null) {
   return Number.isFinite(scheduleId) ? scheduleId : null;
 }
 
+function getManilaDateKey(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function isSessionFromToday(startAt: string) {
+  return getManilaDateKey(startAt) === getManilaDateKey(new Date());
+}
+
+function isManageableSessionStatus(status: string) {
+  const normalizedStatus = status.trim().toLowerCase();
+  return normalizedStatus === 'active' || normalizedStatus === 'ended';
+}
+
 export default function ScheduleDetailScreen() {
   const theme = useAppTheme();
   const { user } = useAuth();
@@ -45,6 +66,7 @@ export default function ScheduleDetailScreen() {
   const schedule = useMemo(() => parseSchedule(params.schedule), [params.schedule]);
   const scheduleId = getScheduleId(schedule);
   const roleName = user?.role?.role_name;
+  const managesAttendance = canManageAttendance(roleName);
   const {
     data: activeSession = null,
     error: activeSessionError,
@@ -57,6 +79,13 @@ export default function ScheduleDetailScreen() {
     refetchOnMount: 'always',
     staleTime: 0,
   });
+  const todaysInstructorSession =
+    managesAttendance &&
+    activeSession &&
+    isSessionFromToday(activeSession.start_at) &&
+    isManageableSessionStatus(activeSession.status)
+      ? activeSession
+      : null;
 
   if (!schedule) {
     return (
@@ -73,8 +102,19 @@ export default function ScheduleDetailScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
-        <ScheduleDetailHeader schedule={schedule} />
+      <ScheduleDetailHeader schedule={schedule} />
+      {scheduleId !== null &&
+      !isCheckingActiveSession &&
+      !activeSessionError &&
+      managesAttendance &&
+      !todaysInstructorSession ? (
+        <InstructorScheduleDetail schedule={schedule} />
+      ) : (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 28 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
         {scheduleId === null ? (
           <View className="mx-4 items-center rounded-[20px] border p-6" style={{ borderColor: theme.colors.border }}>
             <Ionicons name="alert-circle-outline" size={38} color={theme.colors.danger} />
@@ -109,14 +149,15 @@ export default function ScheduleDetailScreen() {
               <Text className="font-black text-white">Try Again</Text>
             </Pressable>
           </View>
-        ) : canManageAttendance(roleName) && activeSession ? (
-          <ActiveAttendanceSessionCard schedule={schedule} session={activeSession} />
-        ) : canManageAttendance(roleName) ? (
+        ) : managesAttendance && todaysInstructorSession ? (
+          <ActiveAttendanceSessionCard schedule={schedule} session={todaysInstructorSession} />
+        ) : managesAttendance ? (
           <InstructorScheduleDetail schedule={schedule} />
         ) : (
           <StudentScheduleDetail activeSession={activeSession} schedule={schedule} />
         )}
-      </ScrollView>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }

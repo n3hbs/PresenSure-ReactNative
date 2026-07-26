@@ -7,6 +7,7 @@ import {
   type Device,
   type Subscription,
 } from "react-native-ble-plx";
+import * as Linking from "expo-linking";
 import { Platform } from "react-native";
 
 import { requestPresenSurePermission } from "@/features/permissions/permission-service";
@@ -36,6 +37,28 @@ export type DetectedEsp32Beacon = {
 export type ConnectedEsp32Beacon = {
   device: Device;
 };
+
+export class BluetoothPoweredOffError extends Error {
+  constructor() {
+    super("Bluetooth is turned off.");
+    this.name = "BluetoothPoweredOffError";
+  }
+}
+
+export function isBluetoothPoweredOffError(
+  error: unknown,
+): error is BluetoothPoweredOffError {
+  return error instanceof BluetoothPoweredOffError;
+}
+
+export async function openBluetoothSettings() {
+  if (Platform.OS === "android") {
+    await Linking.sendIntent("android.settings.BLUETOOTH_SETTINGS");
+    return;
+  }
+
+  await Linking.openSettings();
+}
 
 function parseJsonCharacteristic<T>(value: string | null, label: string): T {
   if (!value) throw new Error(`${label} returned an empty value.`);
@@ -172,7 +195,7 @@ async function waitForPoweredOnAdapter() {
   if (currentState === State.PoweredOn) return;
 
   if (currentState === State.PoweredOff) {
-    throw new Error("Turn on Bluetooth and try again.");
+    throw new BluetoothPoweredOffError();
   }
   if (currentState === State.Unauthorized) {
     throw new Error("Bluetooth access is disabled for PresenSure. Enable it in app settings.");
@@ -196,7 +219,7 @@ async function waitForPoweredOnAdapter() {
       } else if (state === State.PoweredOff) {
         clearTimeout(timeout);
         subscription?.remove();
-        reject(new Error("Turn on Bluetooth and try again."));
+        reject(new BluetoothPoweredOffError());
       } else if (state === State.Unauthorized) {
         clearTimeout(timeout);
         subscription?.remove();

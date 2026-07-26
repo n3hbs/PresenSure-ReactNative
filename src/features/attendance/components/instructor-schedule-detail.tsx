@@ -5,23 +5,27 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
+  ScrollView,
   Switch,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppTheme } from "@/app/providers/theme-provider";
 import { attendanceSessionQueryKeys } from "@/features/attendance/attendance-session-query-keys";
+import { showBluetoothOffAlert } from "@/features/attendance/bluetooth-settings-alert";
 import { Esp32BeaconPickerModal } from "@/features/attendance/components/esp32-beacon-picker-modal";
 import {
   createAttendanceSession,
   getServerTime,
 } from "@/services/attendance-session-service";
 import {
-  connectToEsp32Beacon,
   configureEsp32Attendance,
+  connectToEsp32Beacon,
   disconnectFromEsp32Beacon,
+  isBluetoothPoweredOffError,
   isEsp32BeaconConnected,
   scanForEsp32Beacons,
   subscribeToEsp32Disconnection,
@@ -29,6 +33,7 @@ import {
 } from "@/services/ble/esp32-beacon-connection";
 import type { VerificationMode } from "@/types/attendance-session";
 import type { CourseSchedule } from "@/types/course-schedule";
+import { logError } from "@/utils/logger";
 import {
   formatDateTimeInManila,
   formatDays,
@@ -37,7 +42,6 @@ import {
   isScheduleActive,
   parseTimeToMinutes,
 } from "@/utils/schedule-time";
-import { logError } from "@/utils/logger";
 
 const MIN_DURATION_MINUTES = 15;
 const DURATION_STEP_MINUTES = 5;
@@ -113,6 +117,7 @@ export function InstructorScheduleDetail({
   schedule: CourseSchedule;
 }) {
   const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [verificationMode, setVerificationMode] =
     useState<VerificationMode>("ble_face");
@@ -130,7 +135,7 @@ export function InstructorScheduleDetail({
   const [isScanningEsp32, setIsScanningEsp32] = useState(false);
   const [isConnectingEsp32, setIsConnectingEsp32] = useState(false);
   const [requiresPeriodicVerification, setRequiresPeriodicVerification] =
-    useState(true);
+    useState(false);
   const [serverNow, setServerNow] = useState<Date>(() => new Date());
   const [isServerTimeLoading, setIsServerTimeLoading] = useState(true);
   const [durationMinutes, setDurationMinutes] = useState<number | null>(null);
@@ -141,7 +146,9 @@ export function InstructorScheduleDetail({
     mutationFn: createAttendanceSession,
   });
   const connectedDeviceIdRef = useRef<string | null>(null);
-  const disconnectionSubscriptionRef = useRef<{ remove: () => void } | null>(null);
+  const disconnectionSubscriptionRef = useRef<{ remove: () => void } | null>(
+    null,
+  );
 
   const scheduleId = useMemo(() => toNumericId(schedule.id), [schedule.id]);
   const serverClock = useMemo(
@@ -213,8 +220,8 @@ export function InstructorScheduleDetail({
         : selectedBeaconId === null
           ? "Select the ESP32 beacon detected for this room."
           : !esp32Connected
-              ? "Connect successfully to the ESP32 BLE beacon before starting attendance."
-              : null;
+            ? "Connect successfully to the ESP32 BLE beacon before starting attendance."
+            : null;
 
   function adjustDuration(amount: number) {
     if (!canMeetMinimumDuration) return;
@@ -275,12 +282,18 @@ export function InstructorScheduleDetail({
           ? scanError.message
           : "Unable to scan for ESP32 beacons.";
       setError(message);
+      if (isBluetoothPoweredOffError(scanError)) {
+        setIsBeaconModalVisible(false);
+        showBluetoothOffAlert();
+      }
     } finally {
       setIsScanningEsp32(false);
     }
   }
 
-  async function handleConnectEsp32(beacon: DetectedEsp32Beacon | null = selectedBeacon) {
+  async function handleConnectEsp32(
+    beacon: DetectedEsp32Beacon | null = selectedBeacon,
+  ) {
     if (!beacon) {
       setError("Select a detected ESP32 beacon first.");
       return;
@@ -310,7 +323,7 @@ export function InstructorScheduleDetail({
       setEsp32Connected(true);
       setSelectedBeacon({ ...beacon, beaconId: device.id });
       setEsp32ConnectionLabel(
-        `${device.localName ?? device.name ?? "PresenSure ESP32"} - ${device.id}`,
+        device.localName ?? device.name ?? "PresenSure ESP32",
       );
     } catch (connectError) {
       logError("attendance.ble.connect", connectError, {
@@ -324,17 +337,36 @@ export function InstructorScheduleDetail({
           ? connectError.message
           : "Unable to connect to the ESP32 beacon.";
       setError(message);
+      if (isBluetoothPoweredOffError(connectError)) {
+        showBluetoothOffAlert();
+      }
     } finally {
       setIsConnectingEsp32(false);
     }
   }
 
-  async function handleStartSession() {
-    if (
-      !canSubmit ||
-      scheduleId === null ||
-      !selectedBeacon
-    ) return;
+  function handleStartSession() {
+    if (disabledReason) {
+      setError(disabledReason);
+      Alert.alert("Complete the form", disabledReason);
+      return;
+    }
+
+    Alert.alert(
+      "Start attendance?",
+      "Once attendance starts, these settings cannot be edited.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Start Attendance",
+          onPress: () => void createSession(),
+        },
+      ],
+    );
+  }
+
+  async function createSession() {
+    if (scheduleId === null || !selectedBeacon || !canSubmit) return;
 
     setIsSubmitting(true);
     setError(null);
@@ -356,7 +388,9 @@ export function InstructorScheduleDetail({
       ) {
         setEsp32Connected(false);
         setEsp32ConnectionLabel(null);
-        throw new Error("The ESP32 disconnected. Connect it again before starting attendance.");
+        throw new Error(
+          "The ESP32 disconnected. Connect it again before starting attendance.",
+        );
       }
 
       const response = await createSessionMutation.mutateAsync({
@@ -373,7 +407,7 @@ export function InstructorScheduleDetail({
         ? response.data.expires_at_timestamp!
         : !Number.isNaN(parsedEndTime)
           ? Math.floor(parsedEndTime / 1000)
-          : response.data.beacon_configuration?.end_time ?? 0;
+          : (response.data.beacon_configuration?.end_time ?? 0);
 
       const startSessionCommand = {
         command: "START_SESSION" as const,
@@ -397,7 +431,9 @@ export function InstructorScheduleDetail({
       connectedDeviceIdRef.current = null;
       setEsp32Connected(false);
       setEsp32Advertising(true);
-      setEsp32ConnectionLabel("ESP32 is broadcasting rotating attendance tokens");
+      setEsp32ConnectionLabel(
+        "ESP32 is broadcasting rotating attendance tokens",
+      );
       queryClient.setQueryData(
         attendanceSessionQueryKeys.active(scheduleId),
         session,
@@ -417,11 +453,13 @@ export function InstructorScheduleDetail({
       const connectedDeviceId = connectedDeviceIdRef.current;
       connectedDeviceIdRef.current = null;
       if (connectedDeviceId) {
-        await disconnectFromEsp32Beacon(connectedDeviceId).catch((disconnectError) => {
-          logError("attendance.ble.disconnect-after-error", disconnectError, {
-            blePeripheralId: connectedDeviceId,
-          });
-        });
+        await disconnectFromEsp32Beacon(connectedDeviceId).catch(
+          (disconnectError) => {
+            logError("attendance.ble.disconnect-after-error", disconnectError, {
+              blePeripheralId: connectedDeviceId,
+            });
+          },
+        );
       }
       setEsp32Connected(false);
       setEsp32ConnectionLabel(null);
@@ -437,7 +475,11 @@ export function InstructorScheduleDetail({
 
   if (!activeNow) {
     return (
-      <View className="mx-4 gap-4">
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 28, paddingHorizontal: 16 }}
+        showsVerticalScrollIndicator={false}
+      >
         <View
           className="items-center rounded-[20px] border p-6 shadow-md shadow-slate-900/10"
           style={{
@@ -480,12 +522,12 @@ export function InstructorScheduleDetail({
             />
           </View>
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
   return (
-    <View className="mx-4 gap-4">
+    <View className="flex-1">
       <Esp32BeaconPickerModal
         beacons={detectedBeacons}
         isScanning={isScanningEsp32}
@@ -512,29 +554,39 @@ export function InstructorScheduleDetail({
         visible={isBeaconModalVisible}
       />
 
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 16, paddingHorizontal: 16 }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
       <View
-        className="rounded-[20px] border p-5 shadow-md shadow-slate-900/10"
+        className="rounded-[20px] p-4"
         style={{
           backgroundColor: theme.colors.surface,
-          borderColor: theme.colors.border,
+          elevation: 6,
+          shadowColor: "#0F172A",
+          shadowOffset: { width: 0, height: 12 },
+          shadowOpacity: theme.resolvedMode === "dark" ? 0.3 : 0.18,
+          shadowRadius: 20,
         }}
       >
         <View className="flex-row items-center">
           <View
-            className="mr-3 h-11 w-11 items-center justify-center rounded-full"
+            className="mr-2.5 h-9 w-9 items-center justify-center rounded-full"
             style={{ backgroundColor: theme.colors.primarySoft }}
           >
-            <Ionicons name="radio" size={22} color={theme.colors.primary} />
+            <Ionicons name="radio" size={19} color={theme.colors.primary} />
           </View>
           <View className="flex-1">
             <Text
-              className="text-lg font-black"
+              className="text-base font-black"
               style={{ color: theme.colors.text }}
             >
               Start Attendance
             </Text>
             <Text
-              className="mt-1 text-sm font-bold"
+              className="mt-0.5 text-xs font-bold"
               style={{
                 color: activeNow
                   ? theme.colors.success
@@ -548,7 +600,7 @@ export function InstructorScheduleDetail({
           </View>
         </View>
 
-        <View className="mt-5">
+        <View className="mt-4">
           <Text
             className="mb-2 text-[11px] font-black uppercase"
             style={{ color: theme.colors.textMuted }}
@@ -556,7 +608,7 @@ export function InstructorScheduleDetail({
             Attendance verification mode
           </Text>
           <View
-            className="flex-row rounded-full p-1.5"
+            className="flex-row rounded-full p-1"
             style={{ backgroundColor: theme.colors.surfaceMuted }}
           >
             {(["ble_face", "ble", "face"] as VerificationMode[]).map((mode) => {
@@ -573,7 +625,7 @@ export function InstructorScheduleDetail({
                   key={mode}
                   accessibilityRole="button"
                   onPress={() => setVerificationMode(mode)}
-                  className="min-h-[42px] flex-1 items-center justify-center rounded-full"
+                  className="min-h-[36px] flex-1 items-center justify-center rounded-full"
                   style={{
                     backgroundColor: selected
                       ? theme.colors.surface
@@ -596,39 +648,36 @@ export function InstructorScheduleDetail({
           </View>
         </View>
 
-        <View
-          className="mt-5 rounded-md border p-4"
-          style={{ borderColor: theme.colors.border }}
-        >
-          <Text
-            className="text-[11px] font-black uppercase"
-            style={{ color: theme.colors.textMuted }}
+        <View className="mt-4">
+          <View className="mb-2 flex-row items-center justify-between">
+            <Text
+              className="text-[11px] font-black uppercase"
+              style={{ color: theme.colors.textMuted }}
+            >
+              Duration
+            </Text>
+            <Text
+              className="text-[11px] font-bold"
+              style={{ color: theme.colors.textMuted }}
+            >
+              {canMeetMinimumDuration
+                ? `15 min–${formatDuration(maxDurationMinutes)}`
+                : "Unavailable now"}
+            </Text>
+          </View>
+          <View
+            className="flex-row items-center rounded-[16px] p-1.5"
+            style={{ backgroundColor: theme.colors.surfaceMuted }}
           >
-            Duration
-          </Text>
-          <TextInput
-            value={durationInput}
-            onChangeText={handleDurationInputChange}
-            placeholder={String(maxDurationMinutes)}
-            placeholderTextColor={theme.colors.textMuted}
-            keyboardType="number-pad"
-            className="mt-3 min-h-[48px] rounded-md border px-4 text-center text-xl font-black"
-            style={{
-              backgroundColor: theme.colors.background,
-              borderColor: theme.colors.border,
-              color: theme.colors.text,
-            }}
-          />
-          <View className="mt-3 flex-row items-center justify-between">
             <Pressable
               accessibilityRole="button"
               disabled={!canDecreaseDuration}
               onPress={() => adjustDuration(-DURATION_STEP_MINUTES)}
-              className="h-11 w-11 items-center justify-center rounded-md"
+              className="h-11 w-11 items-center justify-center rounded-[12px]"
               style={{
                 backgroundColor: canDecreaseDuration
-                  ? theme.colors.primarySoft
-                  : theme.colors.surfaceMuted,
+                  ? theme.colors.surface
+                  : "transparent",
               }}
             >
               <Ionicons
@@ -642,15 +691,25 @@ export function InstructorScheduleDetail({
               />
             </Pressable>
 
-            <View className="mx-3 flex-1 items-center">
+            <View className="mx-2 flex-1 items-center justify-center">
+              <View className="flex-row items-baseline justify-center">
+                <TextInput
+                  value={durationInput || String(selectedDurationMinutes)}
+                  onChangeText={handleDurationInputChange}
+                  keyboardType="number-pad"
+                  selectTextOnFocus
+                  className="min-w-[44px] p-0 text-right text-2xl font-black"
+                  style={{ color: theme.colors.text }}
+                />
+                <Text
+                  className="ml-1 text-xs font-black"
+                  style={{ color: theme.colors.textMuted }}
+                >
+                  min
+                </Text>
+              </View>
               <Text
-                className="text-2xl font-black"
-                style={{ color: theme.colors.text }}
-              >
-                {formatDuration(selectedDurationMinutes)}
-              </Text>
-              <Text
-                className="mt-1 text-xs font-bold"
+                className="text-[11px] font-bold"
                 style={{ color: theme.colors.textMuted }}
               >
                 Ends at {selectedEndTime}
@@ -661,11 +720,11 @@ export function InstructorScheduleDetail({
               accessibilityRole="button"
               disabled={!canIncreaseDuration}
               onPress={() => adjustDuration(DURATION_STEP_MINUTES)}
-              className="h-11 w-11 items-center justify-center rounded-md"
+              className="h-11 w-11 items-center justify-center rounded-[12px]"
               style={{
                 backgroundColor: canIncreaseDuration
-                  ? theme.colors.primarySoft
-                  : theme.colors.surfaceMuted,
+                  ? theme.colors.surface
+                  : "transparent",
               }}
             >
               <Ionicons
@@ -679,19 +738,46 @@ export function InstructorScheduleDetail({
               />
             </Pressable>
           </View>
-          <Text
-            className="mt-3 text-xs font-bold leading-5"
-            style={{ color: theme.colors.textMuted }}
-          >
-            Enter minutes. Min 15 min. Max{" "}
-            {formatDuration(Math.max(maxDurationMinutes, 0))}.
-          </Text>
         </View>
 
         <View
-          className="mt-4 flex-row items-center rounded-md border p-3"
-          style={{ borderColor: theme.colors.border }}
+          className="mt-3 flex-row items-center rounded-[14px] p-2.5"
+          style={{
+            backgroundColor: theme.colors.surfaceMuted,
+          }}
         >
+          <Switch
+            value={requiresPeriodicVerification}
+            onValueChange={setRequiresPeriodicVerification}
+            trackColor={{
+              false: theme.colors.textMuted,
+              true: theme.colors.primary,
+            }}
+            thumbColor={
+              requiresPeriodicVerification
+                ? "#FFFFFF"
+                : theme.colors.surface
+            }
+            ios_backgroundColor={theme.colors.textMuted}
+          />
+          <View className="ml-3 flex-1">
+            <Text
+              className="text-sm font-black"
+              style={{ color: theme.colors.text }}
+            >
+              2 min student rescan
+            </Text>
+            <Text
+              className="mt-0.5 text-xs font-bold leading-5"
+              style={{ color: theme.colors.textMuted }}
+            >
+              {requiresPeriodicVerification
+                ? "Students rescan every 2 minutes."
+                : "Students verify once."}
+            </Text>
+          </View>
+        </View>
+        <View className="mt-3 flex-row items-center rounded-[14px] p-2.5">
           <Ionicons
             name={
               esp32Connected || esp32Advertising
@@ -717,53 +803,14 @@ export function InstructorScheduleDetail({
           </Text>
         </View>
 
-        <View
-          className="mt-4 flex-row items-center rounded-md border p-3"
-          style={{
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.background,
-          }}
-        >
-          <Switch
-            value={requiresPeriodicVerification}
-            onValueChange={setRequiresPeriodicVerification}
-            trackColor={{
-              false: theme.colors.surfaceMuted,
-              true: theme.colors.primarySoft,
-            }}
-            thumbColor={
-              requiresPeriodicVerification
-                ? theme.colors.primary
-                : theme.colors.textMuted
-            }
-          />
-          <View className="ml-3 flex-1">
-            <Text
-              className="text-sm font-black"
-              style={{ color: theme.colors.text }}
-            >
-              2 min student rescan
-            </Text>
-            <Text
-              className="mt-0.5 text-xs font-bold leading-5"
-              style={{ color: theme.colors.textMuted }}
-            >
-              {requiresPeriodicVerification
-                ? "Students must periodically verify presence during the session."
-                : "Students verify only once when they mark attendance."}
-            </Text>
-          </View>
-        </View>
-
-        <View className="mt-4 gap-3">
+        <View className="mt-3 gap-2">
           <Pressable
             accessibilityRole="button"
             disabled={isScanningEsp32}
             onPress={handleScanEsp32}
-            className="flex-row items-center justify-center rounded-md border p-3"
+            className="min-h-[44px] flex-row items-center justify-center rounded-[12px] px-3"
             style={{
-              borderColor: theme.colors.border,
-              backgroundColor: theme.colors.background,
+              backgroundColor: theme.colors.primarySoft,
             }}
           >
             {isScanningEsp32 ? (
@@ -793,10 +840,9 @@ export function InstructorScheduleDetail({
             onPress={() => {
               void handleConnectEsp32();
             }}
-            className="flex-row items-center rounded-md border p-3"
+            className="min-h-[44px] flex-row items-center rounded-[12px] px-3"
             style={{
-              borderColor: theme.colors.border,
-              backgroundColor: theme.colors.background,
+              backgroundColor: theme.colors.surfaceMuted,
             }}
           >
             {isConnectingEsp32 ? (
@@ -837,7 +883,7 @@ export function InstructorScheduleDetail({
 
         {disabledReason ? (
           <Text
-            className="mt-4 text-sm font-bold"
+            className="mt-3 text-xs font-bold"
             style={{ color: theme.colors.textMuted }}
           >
             {disabledReason}
@@ -846,39 +892,37 @@ export function InstructorScheduleDetail({
 
         {error ? (
           <Text
-            className="mt-4 text-sm font-bold"
+            className="mt-3 text-xs font-bold"
             style={{ color: theme.colors.danger }}
           >
             {error}
           </Text>
         ) : null}
 
+      </View>
+      </ScrollView>
+
+      <View
+        className="px-4 pt-3"
+        style={{
+          backgroundColor: theme.colors.background,
+          paddingBottom: Math.max(insets.bottom, 16),
+        }}
+      >
         <Pressable
           accessibilityRole="button"
-          disabled={!canSubmit}
+          disabled={isSubmitting}
           onPress={handleStartSession}
-          className="mt-5 min-h-[50px] flex-row items-center justify-center rounded-md"
-          style={({ pressed }) => ({
-            backgroundColor: canSubmit
-              ? theme.colors.primary
-              : theme.colors.border,
-            opacity: pressed ? 0.86 : 1,
-          })}
+          className={`min-h-14 flex-row items-center justify-center rounded-[14px] border-2 border-blue-700 bg-blue-600 shadow-lg shadow-blue-600/40 active:opacity-80 ${isSubmitting ? "opacity-80" : ""}`}
         >
           {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : null}
           <Text
-            className={
-              isSubmitting
-                ? "ml-2 text-base font-black"
-                : "text-base font-black"
-            }
-            style={{ color: "#FFFFFF" }}
+            className={isSubmitting ? "ml-2 text-base font-black text-white" : "text-base font-black text-white"}
           >
-            {isSubmitting ? "Starting" : "Start Session"}
+            {isSubmitting ? "Starting" : "Start Attendance"}
           </Text>
         </Pressable>
       </View>
-
     </View>
   );
 }

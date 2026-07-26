@@ -137,8 +137,7 @@ export function Esp32BeaconPickerModal({
                           {beacon.name}
                         </Text>
                         <Text className="mt-0.5 text-xs font-bold" style={{ color: theme.colors.textMuted }}>
-                          ID: {beacon.beaconId}
-                          {beacon.rssi !== null ? ` | RSSI ${beacon.rssi}` : ""}
+                          {beacon.rssi !== null ? `Signal strength: ${beacon.rssi} RSSI` : "Signal strength unavailable"}
                         </Text>
                       </View>
                       {beacon.isRecommended ? (
