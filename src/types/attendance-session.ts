@@ -65,7 +65,6 @@ export type StopAttendanceSessionRequest = {
 
 export type StoppedAttendanceSession = {
   attendance_session_id: number;
-  schedule_id: number;
   status: 'ended' | string;
   end_at: string;
 };
@@ -73,7 +72,25 @@ export type StoppedAttendanceSession = {
 export type StopAttendanceSessionResponse = {
   success: boolean;
   message: string;
-  data: StoppedAttendanceSession | null;
+  data: {
+    session: StoppedAttendanceSession;
+  } | null;
+};
+
+export type ContinueAttendanceSessionRequest = {
+  attendance_session_id: number;
+  schedule_id: number;
+  device_id: string;
+};
+
+export type ContinueAttendanceSessionResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    session: AttendanceSession;
+    ble_token: string;
+    beacon_configuration: Esp32BeaconConfiguration;
+  };
 };
 
 export type AttendanceSessionResponse = {

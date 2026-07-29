@@ -6,6 +6,8 @@ import type {
   AttendanceSession,
   AttendanceSessionRequest,
   AttendanceSessionResponse,
+  ContinueAttendanceSessionRequest,
+  ContinueAttendanceSessionResponse,
   StopAttendanceSessionRequest,
   StopAttendanceSessionResponse,
 } from "@/types/attendance-session";
@@ -107,7 +109,7 @@ export async function stopAttendanceSession(
 ): Promise<StopAttendanceSessionResponse> {
   try {
     const response = await apiClient.put<StopAttendanceSessionResponse>(
-      "api/attendance-session",
+      "api/attendance-session/stop",
       payload,
     );
 
@@ -124,6 +126,35 @@ export async function stopAttendanceSession(
         typeof error.response?.data?.message === "string"
           ? error.response.data.message
           : "Unable to stop the attendance session.";
+      throw new Error(message);
+    }
+
+    throw error;
+  }
+}
+
+export async function continueAttendanceSession(
+  payload: ContinueAttendanceSessionRequest,
+): Promise<ContinueAttendanceSessionResponse> {
+  try {
+    const response = await apiClient.put<ContinueAttendanceSessionResponse>(
+      "api/attendance-session/continue",
+      payload,
+    );
+
+    if (!response.data.success || !response.data.data) {
+      throw new Error(
+        response.data.message || "Unable to continue the attendance session.",
+      );
+    }
+
+    return response.data;
+  } catch (error) {
+    if (isAxiosError(error)) {
+      const message =
+        typeof error.response?.data?.message === "string"
+          ? error.response.data.message
+          : "Unable to continue the attendance session.";
       throw new Error(message);
     }
 
