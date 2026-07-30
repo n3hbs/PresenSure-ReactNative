@@ -15,7 +15,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAppTheme } from '@/app/providers/theme-provider';
+import { StatusBar } from 'react-native';
+
 import { useAuth } from '@/context/auth-context';
 import {
   clearRememberedUserId,
@@ -24,8 +25,16 @@ import {
 } from '@/utils/auth-storage';
 import { isValidUserId } from '@/utils/validators';
 
+const lightTheme = {
+  background: '#F8FAFC',
+  surface: '#F1F5F9',
+  border: '#CBD5E1',
+  text: '#0F172A',
+  textMuted: '#64748B',
+  primary: '#2563EB',
+};
+
 export default function LoginScreen() {
-  const theme = useAppTheme();
   const { signIn } = useAuth();
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
@@ -108,11 +117,12 @@ export default function LoginScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#2563EB' }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: lightTheme.background }} edges={['top']}>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
-        style={{ backgroundColor: theme.colors.background }}>
+        style={{ backgroundColor: lightTheme.background }}>
         <ScrollView
           ref={scrollViewRef}
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
@@ -131,18 +141,18 @@ export default function LoginScreen() {
               <ShieldCheck size={34} color="#FFFFFF" />
             </View>
             <Text className="text-xs font-black tracking-[1.6px] text-blue-600">PRESENSURE</Text>
-            <Text className="mt-2 text-[34px] font-black" style={{ color: theme.colors.text }}>Sign in</Text>
-            <Text className="mt-2 max-w-[300px] text-[15px] leading-[22px]" style={{ color: theme.colors.textMuted }}>
+            <Text className="mt-2 text-[34px] font-black" style={{ color: lightTheme.text }}>Sign in</Text>
+            <Text className="mt-2 max-w-[300px] text-[15px] leading-[22px]" style={{ color: lightTheme.textMuted }}>
               Use your student or account ID to continue.
             </Text>
 
             <View className="mt-[34px] gap-4">
               <View className="gap-2">
-                <Text className="text-[13px] font-extrabold" style={{ color: theme.colors.text }}>User ID</Text>
+                <Text className="text-[13px] font-extrabold" style={{ color: lightTheme.text }}>User ID</Text>
                 <View
                   className="min-h-14 flex-row items-center rounded-2xl px-[15px]"
-                  style={{ backgroundColor: theme.colors.surface, borderRadius: 16 }}>
-                  <User size={19} color={theme.colors.textMuted} />
+                  style={{ backgroundColor: lightTheme.surface, borderRadius: 16 }}>
+                  <User size={19} color={lightTheme.textMuted} />
                   <TextInput
                     autoCapitalize="characters"
                     autoCorrect={false}
@@ -150,32 +160,32 @@ export default function LoginScreen() {
                     onChangeText={setUserId}
                     onFocus={scrollFormControlsIntoView}
                     placeholder="C-0000-0000"
-                    placeholderTextColor={theme.colors.textMuted}
+                    placeholderTextColor={lightTheme.textMuted}
                     returnKeyType="next"
                     className="flex-1 py-3 text-base font-bold text-slate-950"
-                    style={{ color: theme.colors.text }}
+                    style={{ color: lightTheme.text }}
                     value={userId}
                   />
                 </View>
               </View>
 
               <View className="gap-2">
-                <Text className="text-[13px] font-extrabold" style={{ color: theme.colors.text }}>Password</Text>
+                <Text className="text-[13px] font-extrabold" style={{ color: lightTheme.text }}>Password</Text>
                 <View
                   className="min-h-14 flex-row items-center rounded-2xl px-[15px]"
-                  style={{ backgroundColor: theme.colors.surface, borderRadius: 16 }}>
-                  <Lock size={19} color={theme.colors.textMuted} />
+                  style={{ backgroundColor: lightTheme.surface, borderRadius: 16 }}>
+                  <Lock size={19} color={lightTheme.textMuted} />
                   <TextInput
                     autoCapitalize="none"
                     onChangeText={setPassword}
                     onFocus={scrollFormControlsIntoView}
                     onSubmitEditing={handleLogin}
                     placeholder="Password"
-                    placeholderTextColor={theme.colors.textMuted}
+                    placeholderTextColor={lightTheme.textMuted}
                     returnKeyType="done"
                     secureTextEntry={!isPasswordVisible}
                     className="flex-1 py-3 text-base font-bold text-slate-950"
-                    style={{ color: theme.colors.text }}
+                    style={{ color: lightTheme.text }}
                     value={password}
                   />
                   <Pressable
@@ -183,9 +193,9 @@ export default function LoginScreen() {
                     onPress={() => setIsPasswordVisible((current) => !current)}
                     className="h-[38px] w-[38px] items-center justify-center">
                     {isPasswordVisible ? (
-                      <EyeOff size={20} color={theme.colors.textMuted} />
+                      <EyeOff size={20} color={lightTheme.textMuted} />
                     ) : (
-                      <Eye size={20} color={theme.colors.textMuted} />
+                      <Eye size={20} color={lightTheme.textMuted} />
                     )}
                   </Pressable>
                 </View>
@@ -200,14 +210,14 @@ export default function LoginScreen() {
                 <View
                   className="h-[22px] w-[22px] items-center justify-center rounded-[7px] border-2"
                   style={{
-                    backgroundColor: rememberMe ? theme.colors.primary : theme.colors.surface,
-                    borderColor: rememberMe ? theme.colors.primary : theme.colors.border,
+                    backgroundColor: rememberMe ? lightTheme.primary : lightTheme.surface,
+                    borderColor: rememberMe ? lightTheme.primary : lightTheme.border,
                   }}>
                   {rememberMe && <Check size={15} color="#FFFFFF" />}
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm font-extrabold" style={{ color: theme.colors.text }}>Remember me</Text>
-                  <Text className="mt-0.5 text-xs font-semibold" style={{ color: theme.colors.textMuted }}>
+                  <Text className="text-sm font-extrabold" style={{ color: lightTheme.text }}>Remember me</Text>
+                  <Text className="mt-0.5 text-xs font-semibold" style={{ color: lightTheme.textMuted }}>
                     Save this user ID for next time.
                   </Text>
                 </View>

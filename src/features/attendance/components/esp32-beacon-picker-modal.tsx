@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from "react-native";
 
-import { useAppTheme } from "@/app/providers/theme-provider";
+import { useAppTheme } from "@/providers/theme-provider";
 import type { DetectedEsp32Beacon } from "@/services/ble/esp32-beacon-connection";
 
 type Esp32BeaconPickerModalProps = {

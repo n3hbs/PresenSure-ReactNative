@@ -14,7 +14,7 @@ import { useMemo } from 'react';
 import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useAppTheme } from '@/app/providers/theme-provider';
+import { useAppTheme } from '@/providers/theme-provider';
 import { useAuth } from '@/context/auth-context';
 
 function getProfileImageUri(user: ReturnType<typeof useAuth>['user']) {

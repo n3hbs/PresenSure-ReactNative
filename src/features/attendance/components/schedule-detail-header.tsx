@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Text, View } from 'react-native';
 
-import { useAppTheme } from '@/app/providers/theme-provider';
+import { useAppTheme } from '@/providers/theme-provider';
 import type { CourseSchedule } from '@/types/course-schedule';
 import { formatDays, formatTime } from '@/utils/schedule-time';
 
@@ -18,11 +18,6 @@ export function ScheduleDetailHeader({ schedule }: { schedule: CourseSchedule })
     <View
       className="mb-4 rounded-b-[28px] px-6 pb-6 pt-[22px] shadow-lg shadow-slate-900/10"
       style={{ backgroundColor: theme.colors.surface }}>
-      <View
-        className="mb-3 h-[46px] w-[46px] items-center justify-center rounded-full"
-        style={{ backgroundColor: theme.colors.primarySoft }}>
-        <Ionicons name="book" size={24} color={theme.colors.primary} />
-      </View>
       <View className="mb-3.5">
         <Text className="text-xs font-black uppercase tracking-[1.1px]" style={{ color: theme.colors.primary }}>
           {schedule.course_code ?? 'COURSE'}

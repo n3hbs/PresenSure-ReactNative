@@ -1,23 +1,34 @@
 import { Stack, usePathname } from "expo-router";
 import { StatusBar } from "react-native";
 
-import { AppProviders } from "@/app/providers/app-providers";
-import { useAppTheme } from "@/app/providers/theme-provider";
+import { AppProviders } from "@/providers/app-providers";
+import { useAppTheme } from "@/providers/theme-provider";
 import "../global.css";
 
 function RootNavigator() {
   const pathname = usePathname();
   const theme = useAppTheme();
-  const hasBlueTopArea =
-    pathname === "/" ||
-    pathname === "/login" ||
-    pathname === "/profile";
+  const isLoginScreen = pathname === "/login";
+  const hasBlueTopArea = pathname === "/" || pathname === "/profile";
+
+  const statusBgColor = isLoginScreen
+    ? "transparent"
+    : hasBlueTopArea
+    ? "#2563EB"
+    : theme.colors.background;
+
+  const statusBarStyle = isLoginScreen
+    ? "dark-content"
+    : theme.resolvedMode === "dark"
+    ? "light-content"
+    : "dark-content";
 
   return (
     <>
       <StatusBar
-        backgroundColor={hasBlueTopArea ? "#2563EB" : theme.colors.background}
-        barStyle={theme.resolvedMode === "dark" ? "light-content" : "dark-content"}
+        backgroundColor={statusBgColor}
+        barStyle={statusBarStyle}
+        translucent={isLoginScreen}
       />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />

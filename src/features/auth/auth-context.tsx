@@ -12,6 +12,7 @@ import { login } from '@/services/auth-service';
 import type { AuthSession, AuthUser, LoginCredentials } from '@/types/auth';
 import type { DeviceRegistrationStatus, RegisteredDevice } from '@/types/device-registration';
 import { clearStoredSession, getStoredSession, storeSession } from '@/services/storage/auth-storage';
+import { SessionExpiredModal } from '@/components/session-expired-modal';
 
 type AuthContextValue = {
   isAuthenticated: boolean;
@@ -86,6 +87,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setDeviceRegistrationStatus('unregistered');
   }, [queryClient]);
 
+  const [isExpiredModalVisible, setIsExpiredModalVisible] = useState(false);
+
+  const handleExpiredModalConfirm = useCallback(async () => {
+    setIsExpiredModalVisible(false);
+    isShowingExpiredAlert.current = false;
+    await signOut();
+    router.replace('/login');
+  }, [signOut]);
+
   useEffect(() => {
     const interceptorId = apiClient.interceptors.response.use(
       (response) => response,
@@ -96,28 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (hasActiveSession && isSessionExpired && !isShowingExpiredAlert.current) {
           isShowingExpiredAlert.current = true;
-          await signOut();
-
-          Alert.alert(
-            'Session expired',
-            'Your login session has expired. Please sign in again to continue.',
-            [
-              {
-                text: 'OK',
-                onPress: () => {
-                  isShowingExpiredAlert.current = false;
-                  router.replace('/login');
-                },
-              },
-            ],
-            {
-              cancelable: false,
-              onDismiss: () => {
-                isShowingExpiredAlert.current = false;
-                router.replace('/login');
-              },
-            },
-          );
+          setIsExpiredModalVisible(true);
         }
 
         return Promise.reject(error);
@@ -127,7 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       apiClient.interceptors.response.eject(interceptorId);
     };
-  }, [session?.token, signOut]);
+  }, [session?.token]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -152,7 +141,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      <SessionExpiredModal
+        visible={isExpiredModalVisible}
+        onConfirm={handleExpiredModalConfirm}
+      />
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {

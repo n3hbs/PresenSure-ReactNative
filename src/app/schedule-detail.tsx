@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAppTheme } from '@/app/providers/theme-provider';
+import { useAppTheme } from '@/providers/theme-provider';
 import { useAuth } from '@/context/auth-context';
 import { attendanceSessionQueryKeys } from '@/features/attendance/attendance-session-query-keys';
 import { ActiveAttendanceSessionCard } from '@/features/attendance/components/active-attendance-session-card';

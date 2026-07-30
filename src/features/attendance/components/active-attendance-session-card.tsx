@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 
-import { useAppTheme } from "@/app/providers/theme-provider";
+import { useAppTheme } from "@/providers/theme-provider";
 import { attendanceSessionQueryKeys } from "@/features/attendance/attendance-session-query-keys";
 import { showBluetoothOffAlert } from "@/features/attendance/bluetooth-settings-alert";
 import { Esp32BeaconPickerModal } from "@/features/attendance/components/esp32-beacon-picker-modal";

@@ -2,7 +2,7 @@ import { Redirect, Tabs } from 'expo-router';
 import { CalendarDays, Home, ShieldCheck } from 'lucide-react-native';
 import { ActivityIndicator, View } from 'react-native';
 
-import { useAppTheme } from '@/app/providers/theme-provider';
+import { useAppTheme } from '@/providers/theme-provider';
 import { useAuth } from '@/context/auth-context';
 
 const TAB_SIDE_MARGIN = 16;

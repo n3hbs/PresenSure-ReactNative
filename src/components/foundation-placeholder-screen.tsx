@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAppTheme } from '@/app/providers/theme-provider';
+import { useAppTheme } from '@/providers/theme-provider';
 
 type FoundationPlaceholderScreenProps = {
   icon: ComponentProps<typeof Ionicons>['name'];
