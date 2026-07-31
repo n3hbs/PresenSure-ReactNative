@@ -11,7 +11,14 @@ import * as Linking from "expo-linking";
 import { Platform } from "react-native";
 
 import { requestPresenSurePermission } from "@/features/permissions/permission-service";
-import { decodeBlePayload, encodeBlePayload } from "@/services/ble/ble-encoding";
+import {
+  decodeBase64AdvertisementData,
+  decodeBlePayload,
+  encodeBlePayload,
+  parseEsp32ManufacturerData,
+  tryParseJsonPayload,
+  type DecodedEsp32AdvertisementPayload,
+} from "@/services/ble/ble-encoding";
 import { PRESENSURE_BLE } from "@/services/ble/presensure-ble-protocol";
 import type {
   Esp32ConfigurationStatus,
@@ -31,6 +38,14 @@ export type DetectedEsp32Beacon = {
   beaconId: string;
   name: string;
   rssi: number | null;
+  txPowerLevel?: number | null;
+  serviceUUIDs?: string[] | null;
+  manufacturerData?: string | null;
+  serviceData?: Record<string, string> | null;
+  decodedManufacturerData?: string | null;
+  decodedServiceData?: Record<string, string> | null;
+  advertisedPayload?: unknown | null;
+  parsedEsp32Payload?: DecodedEsp32AdvertisementPayload | null;
   isRecommended: boolean;
 };
 
@@ -120,11 +135,46 @@ function toDetectedBeacon(device: Device, scheduleRoom?: string | null): Detecte
   const normalizedBeaconRoom = normalizeBeaconText(name);
   const normalizedScheduleRoom = normalizeBeaconText(scheduleRoom);
 
+  const manufacturerData = device.manufacturerData ?? null;
+  const decodedManufacturerData = decodeBase64AdvertisementData(manufacturerData);
+  const serviceData = device.serviceData ?? null;
+
+  let decodedServiceData: Record<string, string> | null = null;
+  let advertisedPayload: unknown | null = null;
+
+  if (serviceData) {
+    decodedServiceData = {};
+    for (const [uuid, base64Val] of Object.entries(serviceData)) {
+      const decodedText = decodeBase64AdvertisementData(base64Val);
+      if (decodedText) {
+        decodedServiceData[uuid] = decodedText;
+        const parsedJson = tryParseJsonPayload(decodedText);
+        if (parsedJson && !advertisedPayload) {
+          advertisedPayload = parsedJson;
+        }
+      }
+    }
+  }
+
+  if (!advertisedPayload && decodedManufacturerData) {
+    advertisedPayload = tryParseJsonPayload(decodedManufacturerData);
+  }
+
+  const parsedEsp32Payload = parseEsp32ManufacturerData(manufacturerData);
+
   return {
     id: device.id,
     beaconId: device.id,
     name,
     rssi: device.rssi ?? null,
+    txPowerLevel: device.txPowerLevel ?? null,
+    serviceUUIDs: device.serviceUUIDs ?? null,
+    manufacturerData,
+    serviceData,
+    decodedManufacturerData,
+    decodedServiceData,
+    advertisedPayload,
+    parsedEsp32Payload,
     isRecommended:
       normalizedScheduleRoom.length > 0 &&
       normalizedBeaconRoom === normalizedScheduleRoom,

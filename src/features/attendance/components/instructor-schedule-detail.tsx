@@ -419,6 +419,7 @@ export function InstructorScheduleDetail({
         room_code: roomCode,
         token: response.data.ble_token,
         expires_at: expiresAt,
+        verification_mode: verificationMode,
       };
 
       disconnectionSubscriptionRef.current?.remove();

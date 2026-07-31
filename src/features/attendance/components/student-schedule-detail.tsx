@@ -45,6 +45,225 @@ function DetailRow({
   );
 }
 
+function AdvertisedDataCard({ beacon }: { beacon: DetectedEsp32Beacon }) {
+  const theme = useAppTheme();
+  const [showRawDetails, setShowRawDetails] = useState(false);
+  const parsed = beacon.parsedEsp32Payload;
+
+  return (
+    <View
+      className="mt-3 rounded-lg border p-3"
+      style={{
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surfaceMuted,
+      }}>
+      <View className="flex-row items-center justify-between">
+        <View className="flex-row items-center">
+          <Ionicons name="wifi-outline" size={16} color={theme.colors.primary} />
+          <Text className="ml-1.5 text-xs font-black uppercase" style={{ color: theme.colors.primary }}>
+            Advertised ESP32 BLE Data
+          </Text>
+        </View>
+        <View className="rounded-full bg-emerald-500/10 px-2 py-0.5 border border-emerald-500/30">
+          <Text className="text-[10px] font-black text-emerald-600 dark:text-emerald-400">
+            No API Connection Needed
+          </Text>
+        </View>
+      </View>
+
+      {/* Parsed 23-byte ESP32 Payload Card */}
+      {parsed && (
+        <View
+          className="mt-2.5 rounded-md border p-3"
+          style={{ borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }}>
+          <View className="flex-row items-center justify-between">
+            <Text className="text-[11px] font-black uppercase" style={{ color: theme.colors.primary }}>
+              Parsed ESP32 Session Packet
+            </Text>
+            <View className="rounded-full bg-primary/20 px-2 py-0.5">
+              <Text className="text-[10px] font-black uppercase" style={{ color: theme.colors.primary }}>
+                Mode: {parsed.verificationMode.toUpperCase()}
+              </Text>
+            </View>
+          </View>
+
+          <View className="mt-2 gap-1">
+            <View className="flex-row justify-between">
+              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+                Verification Mode:
+              </Text>
+              <Text className="text-xs font-black" style={{ color: theme.colors.text }}>
+                {parsed.verificationMode === 'ble_face'
+                  ? 'BLE + Face Recognition'
+                  : parsed.verificationMode === 'face'
+                  ? 'Face Recognition'
+                  : 'BLE Beacon Only'}
+              </Text>
+            </View>
+
+            <View className="flex-row justify-between">
+              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+                Continuous Verification:
+              </Text>
+              <Text className="text-xs font-black" style={{ color: theme.colors.text }}>
+                {parsed.continuousChecking ? 'Enabled' : 'Disabled'}
+              </Text>
+            </View>
+
+            <View className="flex-row justify-between">
+              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+                Session Hash:
+              </Text>
+              <Text className="text-xs font-mono font-black" style={{ color: theme.colors.text }}>
+                0x{parsed.sessionHash}
+              </Text>
+            </View>
+
+            <View className="flex-row justify-between">
+              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+                Time Window (Epoch):
+              </Text>
+              <Text className="text-xs font-mono font-black" style={{ color: theme.colors.text }}>
+                {parsed.timeWindow}
+              </Text>
+            </View>
+
+            <View className="flex-row justify-between">
+              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+                Rotating Verification Token:
+              </Text>
+              <Text className="text-xs font-mono font-black text-emerald-600 dark:text-emerald-400">
+                0x{parsed.verificationToken}
+              </Text>
+            </View>
+
+            <View className="flex-row justify-between">
+              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+                ESP32 Device Hash:
+              </Text>
+              <Text className="text-xs font-mono font-black" style={{ color: theme.colors.text }}>
+                0x{parsed.deviceHash}
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      <View className="mt-2.5 gap-1.5">
+        <View className="flex-row justify-between">
+          <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+            ESP32 Device / MAC ID:
+          </Text>
+          <Text className="text-xs font-black" style={{ color: theme.colors.text }}>
+            {beacon.id}
+          </Text>
+        </View>
+
+        <View className="flex-row justify-between">
+          <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+            Signal Strength (RSSI):
+          </Text>
+          <Text className="text-xs font-black" style={{ color: theme.colors.text }}>
+            {beacon.rssi !== null ? `${beacon.rssi} dBm` : 'Unavailable'}
+          </Text>
+        </View>
+
+        {beacon.txPowerLevel !== undefined && beacon.txPowerLevel !== null && (
+          <View className="flex-row justify-between">
+            <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+              Tx Power Level:
+            </Text>
+            <Text className="text-xs font-black" style={{ color: theme.colors.text }}>
+              {beacon.txPowerLevel} dBm
+            </Text>
+          </View>
+        )}
+
+        {beacon.serviceUUIDs && beacon.serviceUUIDs.length > 0 && (
+          <View className="mt-1">
+            <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+              Advertised Service UUIDs:
+            </Text>
+            {beacon.serviceUUIDs.map((uuid, idx) => (
+              <Text key={idx} className="mt-0.5 text-[11px] font-mono font-bold" style={{ color: theme.colors.text }}>
+                • {uuid}
+              </Text>
+            ))}
+          </View>
+        )}
+
+        {beacon.advertisedPayload !== undefined && beacon.advertisedPayload !== null && (
+          <View className="mt-2 rounded-md border p-2.5" style={{ borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }}>
+            <Text className="text-[11px] font-black uppercase" style={{ color: theme.colors.primary }}>
+              Decoded Broadcast Payload
+            </Text>
+            <Text className="mt-1 text-xs font-mono font-bold" style={{ color: theme.colors.text }}>
+              {typeof beacon.advertisedPayload === 'object'
+                ? JSON.stringify(beacon.advertisedPayload, null, 2)
+                : String(beacon.advertisedPayload)}
+            </Text>
+          </View>
+        )}
+
+        {beacon.decodedManufacturerData && !beacon.advertisedPayload && !parsed && (
+          <View className="mt-1.5 rounded-md border p-2" style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.background }}>
+            <Text className="text-[10px] font-black uppercase" style={{ color: theme.colors.textMuted }}>
+              Manufacturer Data
+            </Text>
+            <Text className="mt-0.5 text-xs font-mono font-bold" style={{ color: theme.colors.text }}>
+              {beacon.decodedManufacturerData}
+            </Text>
+          </View>
+        )}
+
+        {/* Toggle raw base64 payload view */}
+        {(beacon.manufacturerData || beacon.serviceData) && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setShowRawDetails((prev) => !prev)}
+            className="mt-2 flex-row items-center justify-between py-1">
+            <Text className="text-[11px] font-bold" style={{ color: theme.colors.primary }}>
+              {showRawDetails ? 'Hide raw advertisement payload' : 'Show raw advertisement payload'}
+            </Text>
+            <Ionicons
+              name={showRawDetails ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={theme.colors.primary}
+            />
+          </Pressable>
+        )}
+
+        {showRawDetails && (
+          <View className="mt-1 rounded-md border p-2" style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.background }}>
+            {beacon.manufacturerData && (
+              <View className="mb-1.5">
+                <Text className="text-[10px] font-bold" style={{ color: theme.colors.textMuted }}>
+                  Raw Manufacturer Data (base64):
+                </Text>
+                <Text className="text-[11px] font-mono" style={{ color: theme.colors.text }}>
+                  {beacon.manufacturerData}
+                </Text>
+              </View>
+            )}
+            {beacon.serviceData && (
+              <View>
+                <Text className="text-[10px] font-bold" style={{ color: theme.colors.textMuted }}>
+                  Raw Service Data (base64):
+                </Text>
+                {Object.entries(beacon.serviceData).map(([uuid, base64Val]) => (
+                  <Text key={uuid} className="text-[11px] font-mono" style={{ color: theme.colors.text }}>
+                    {uuid}: {base64Val}
+                  </Text>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
 export function StudentScheduleDetail({
   activeSession,
   schedule,
@@ -53,13 +272,8 @@ export function StudentScheduleDetail({
   schedule: CourseSchedule;
 }) {
   const theme = useAppTheme();
-  const activeNow = isScheduleActive(schedule);
   const normalizedStatus = activeSession?.status?.trim().toLowerCase();
   const isSessionActive = activeSession !== null && normalizedStatus === 'active';
-  const isSessionEnded =
-    activeSession !== null &&
-    (normalizedStatus === 'ended' || normalizedStatus === 'stopped' || normalizedStatus === 'closed');
-  const isAvailable = isSessionActive;
   const expectedRoomName = schedule.room ?? 'Not set';
 
   const [isScanning, setIsScanning] = useState(false);
@@ -76,7 +290,6 @@ export function StudentScheduleDetail({
       setBeacons(results);
       setHasScanned(true);
 
-      // Auto-select recommended matching beacon if available
       const match = results.find((b) => b.isRecommended) ?? results[0] ?? null;
       setSelectedBeacon(match);
     } catch (error) {
@@ -93,59 +306,9 @@ export function StudentScheduleDetail({
     }
   }
 
-  if (!isAvailable) {
-    return (
-      <View className="flex-1" style={{ paddingHorizontal: 16 }}>
-        <View
-          className="items-center rounded-[20px] border p-6 shadow-md shadow-slate-900/10"
-          style={{
-            backgroundColor: theme.colors.surface,
-            borderColor: theme.colors.border,
-          }}>
-          <View
-            className="mb-3 h-12 w-12 items-center justify-center rounded-full"
-            style={{ backgroundColor: theme.colors.primarySoft }}>
-            <Ionicons name="time-outline" size={26} color={theme.colors.primary} />
-          </View>
-
-          <Text className="mt-1 text-lg font-black" style={{ color: theme.colors.text }}>
-            {isSessionEnded
-              ? 'Attendance Session Ended'
-              : activeNow
-              ? 'Attendance Not Started'
-              : 'Attendance Not Active'}
-          </Text>
-
-          <Text
-            className="mt-2 text-center text-sm font-bold leading-5"
-            style={{ color: theme.colors.textMuted }}>
-            {isSessionEnded
-              ? 'The instructor has ended the attendance session for this class.'
-              : activeNow
-              ? 'Waiting for your instructor to start an attendance session.'
-              : 'No active attendance session or class schedule is running right now. Bluetooth scanning will be enabled when your instructor starts attendance.'}
-          </Text>
-
-          <View className="mt-5 w-full gap-3">
-            <DetailRow
-              icon="calendar-outline"
-              label="Schedule"
-              value={`${formatDays(schedule.days ?? schedule.day)} | ${formatTime(schedule.start_time)} - ${formatTime(schedule.end_time)}`}
-            />
-            <DetailRow
-              icon="location-outline"
-              label="Room"
-              value={schedule.room ?? 'Room TBD'}
-            />
-          </View>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View className="flex-1" style={{ paddingHorizontal: 16 }}>
-      {/* Instructor-styled Main Scanning Card */}
+      {/* Main Connectionless BLE Scanning Card */}
       <View
         className="rounded-[20px] p-4"
         style={{
@@ -160,29 +323,35 @@ export function StudentScheduleDetail({
           <View
             className="mr-3 h-11 w-11 items-center justify-center rounded-full"
             style={{ backgroundColor: theme.colors.primarySoft }}>
-            <Ionicons name="bluetooth" size={22} color={theme.colors.primary} />
+            <Ionicons name="radio" size={22} color={theme.colors.primary} />
           </View>
           <View className="flex-1">
             <Text className="text-lg font-black" style={{ color: theme.colors.text }}>
-              ESP32 Beacons
+              ESP32 BLE Advertisements
             </Text>
             <Text className="mt-0.5 text-xs font-bold" style={{ color: theme.colors.textMuted }}>
-              Recommended room: {expectedRoomName}
+              Room: {expectedRoomName} • Direct BLE Scan
             </Text>
           </View>
 
-          {activeSession?.session_code && (
+          {isSessionActive ? (
             <View
-              className="rounded-full px-3 py-1"
-              style={{ backgroundColor: theme.colors.primarySoft }}>
-              <Text className="text-xs font-black" style={{ color: theme.colors.primary }}>
-                #{activeSession.session_code}
+              className="rounded-full bg-emerald-500/10 px-3 py-1 border border-emerald-500/30">
+              <Text className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+                Session Active
+              </Text>
+            </View>
+          ) : (
+            <View
+              className="rounded-full bg-slate-500/10 px-3 py-1 border border-slate-500/30">
+              <Text className="text-xs font-black" style={{ color: theme.colors.textMuted }}>
+                Direct Scan
               </Text>
             </View>
           )}
         </View>
 
-        {/* Scan Action Button matching Instructor UI */}
+        {/* Scan Action Button */}
         <Pressable
           accessibilityRole="button"
           disabled={isScanning}
@@ -198,17 +367,21 @@ export function StudentScheduleDetail({
             <Ionicons name="refresh-outline" size={20} color={theme.colors.primary} />
           )}
           <Text className="ml-2 text-sm font-black" style={{ color: theme.colors.text }}>
-            {isScanning ? 'Scanning PresenSure BLE' : hasScanned ? 'Scan again' : 'Scan PresenSure BLE'}
+            {isScanning
+              ? 'Scanning PresenSure BLE...'
+              : hasScanned
+              ? 'Rescan Room ESP32 BLE'
+              : 'Scan Room ESP32 BLE Broadcasts'}
           </Text>
         </Pressable>
 
-        {/* Scan Results / Beacon List matching Instructor UI */}
+        {/* Scan Results / Connectionless Beacon Data List */}
         <View className="mt-4">
           {isScanning && beacons.length === 0 ? (
             <View className="items-center py-8">
               <ActivityIndicator color={theme.colors.primary} />
               <Text className="mt-3 text-sm font-bold" style={{ color: theme.colors.textMuted }}>
-                Looking for PresenSure BLE beacons
+                Listening for room ESP32 BLE broadcast signals...
               </Text>
             </View>
           ) : null}
@@ -217,16 +390,16 @@ export function StudentScheduleDetail({
             <View className="items-center rounded-md border p-5" style={{ borderColor: theme.colors.border }}>
               <Ionicons name="radio-outline" size={32} color={theme.colors.textMuted} />
               <Text className="mt-3 text-sm font-black" style={{ color: theme.colors.text }}>
-                No PresenSure BLE found
+                No ESP32 BLE Broadcast Found
               </Text>
               <Text className="mt-1 text-center text-xs font-bold leading-5" style={{ color: theme.colors.textMuted }}>
-                Make sure the ESP32 is powered on and named PresenSure-{expectedRoomName}.
+                Make sure you are inside room {expectedRoomName} and the ESP32 beacon is powered on.
               </Text>
             </View>
           ) : null}
 
           {beacons.length > 0 && (
-            <View className="gap-2">
+            <View className="gap-3">
               {beacons.map((beacon) => {
                 const selected = selectedBeacon?.id === beacon.id;
                 const borderColor = beacon.isRecommended
@@ -236,11 +409,9 @@ export function StudentScheduleDetail({
                   : theme.colors.border;
 
                 return (
-                  <Pressable
+                  <View
                     key={beacon.id}
-                    accessibilityRole="button"
-                    onPress={() => setSelectedBeacon(beacon)}
-                    className="rounded-md border p-3"
+                    className="rounded-xl border p-3.5"
                     style={{
                       borderColor,
                       borderWidth: beacon.isRecommended ? 2 : 1,
@@ -249,31 +420,39 @@ export function StudentScheduleDetail({
                           ? theme.colors.primarySoft
                           : theme.colors.background,
                     }}>
-                    <View className="flex-row items-center">
-                      <Ionicons
-                        name={selected ? 'radio-button-on' : 'radio-button-off'}
-                        size={20}
-                        color={selected ? theme.colors.primary : theme.colors.textMuted}
-                      />
-                      <View className="ml-2.5 flex-1">
-                        <Text className="text-sm font-black" style={{ color: theme.colors.text }}>
-                          {beacon.name || 'PresenSure Beacon'}
-                        </Text>
-                        <Text className="mt-0.5 text-xs font-bold" style={{ color: theme.colors.textMuted }}>
-                          {beacon.rssi !== null
-                            ? `Signal strength: ${beacon.rssi} RSSI`
-                            : 'Signal strength unavailable'}
-                        </Text>
-                      </View>
-                      {beacon.isRecommended ? (
-                        <View className="rounded-full px-2 py-1" style={{ backgroundColor: theme.colors.success }}>
-                          <Text className="text-[10px] font-black uppercase" style={{ color: '#FFFFFF' }}>
-                            Match
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => setSelectedBeacon(beacon)}
+                      className="flex-row items-center justify-between">
+                      <View className="flex-row items-center flex-1">
+                        <Ionicons
+                          name={selected ? 'radio-button-on' : 'radio-button-off'}
+                          size={20}
+                          color={selected ? theme.colors.primary : theme.colors.textMuted}
+                        />
+                        <View className="ml-2.5 flex-1">
+                          <Text className="text-sm font-black" style={{ color: theme.colors.text }}>
+                            {beacon.name || 'PresenSure Beacon'}
+                          </Text>
+                          <Text className="mt-0.5 text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+                            {beacon.rssi !== null
+                              ? `Signal strength: ${beacon.rssi} dBm`
+                              : 'Signal strength unavailable'}
                           </Text>
                         </View>
-                      ) : null}
-                    </View>
-                  </Pressable>
+                      </View>
+                      {beacon.isRecommended && (
+                        <View className="rounded-full px-2.5 py-1" style={{ backgroundColor: theme.colors.success }}>
+                          <Text className="text-[10px] font-black uppercase text-white">
+                            Room Match
+                          </Text>
+                        </View>
+                      )}
+                    </Pressable>
+
+                    {/* Advertised Data Section - Connectionless */}
+                    <AdvertisedDataCard beacon={beacon} />
+                  </View>
                 );
               })}
             </View>
@@ -290,3 +469,5 @@ export function StudentScheduleDetail({
     </View>
   );
 }
+
+

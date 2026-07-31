@@ -27,6 +27,7 @@ export type Esp32StartSessionCommand = {
   room_code: string;
   token: string;
   expires_at: number;
+  verification_mode?: VerificationMode;
 };
 
 export type Esp32StopSessionCommand = {
