@@ -1,12 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 
 import { showBluetoothOffAlert } from '@/features/attendance/bluetooth-settings-alert';
+import { attendanceRecordQueryKeys } from '@/features/attendance/attendance-record-query-keys';
 import { FaceGestureChallengeModal } from '@/features/face-recognition/components/face-gesture-challenge-modal';
 import { useAppTheme } from '@/providers/theme-provider';
 import {
+  checkAttendanceRecord,
   storeAttendanceRecord,
+  type AttendanceRecordData,
   type StoreAttendanceRecordResponse,
 } from '@/services/attendance-record-service';
 import {
@@ -16,6 +20,107 @@ import {
 } from '@/services/ble/esp32-beacon-connection';
 import type { AttendanceSession, VerificationMode } from '@/types/attendance-session';
 import type { CourseSchedule } from '@/types/course-schedule';
+
+function ExistingAttendanceRecordCard({
+  record,
+}: {
+  record: AttendanceRecordData;
+}) {
+  const theme = useAppTheme();
+  const statusUpper = record.status?.toUpperCase() ?? 'PRESENT';
+  const verifiedDate = new Date(record.verified_at);
+  const formattedTime = Number.isNaN(verifiedDate.getTime())
+    ? record.verified_at
+    : `${verifiedDate.toLocaleDateString()} at ${verifiedDate.toLocaleTimeString()}`;
+
+  return (
+    <View
+      className="rounded-[20px] border p-5"
+      style={{
+        borderColor: theme.colors.success,
+        backgroundColor: theme.colors.surface,
+        elevation: 6,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: theme.resolvedMode === 'dark' ? 0.3 : 0.18,
+        shadowRadius: 20,
+      }}>
+      <View className="flex-row items-center justify-between">
+        <View className="flex-row items-center flex-1">
+          <View
+            className="mr-3 h-12 w-12 items-center justify-center rounded-full"
+            style={{ backgroundColor: theme.colors.primarySoft }}>
+            <Ionicons name="checkmark-done-circle" size={28} color={theme.colors.success} />
+          </View>
+          <View className="flex-1">
+            <Text className="text-lg font-black" style={{ color: theme.colors.text }}>
+              Attendance Recorded
+            </Text>
+            <Text className="mt-0.5 text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+              Record ID #{record.attendance_record_id}
+            </Text>
+          </View>
+        </View>
+
+        <View className="rounded-full bg-emerald-500/10 px-3 py-1 border border-emerald-500/30">
+          <Text className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+            {statusUpper}
+          </Text>
+        </View>
+      </View>
+
+      <View
+        className="mt-4 rounded-xl border p-4"
+        style={{
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.background,
+        }}>
+        <Text className="text-xs font-black uppercase mb-2" style={{ color: theme.colors.primary }}>
+          Verification Details
+        </Text>
+        <View className="gap-2">
+          <View className="flex-row justify-between">
+            <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+              Verified At:
+            </Text>
+            <Text className="text-xs font-black" style={{ color: theme.colors.text }}>
+              {formattedTime}
+            </Text>
+          </View>
+
+          <View className="flex-row justify-between">
+            <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+              Presence (BLE) Verified:
+            </Text>
+            <Text className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+              {record.presence_verified ? 'YES' : 'NO'}
+            </Text>
+          </View>
+
+          <View className="flex-row justify-between">
+            <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+              Face Verified:
+            </Text>
+            <Text className="text-xs font-black" style={{ color: theme.colors.text }}>
+              {record.face_verified ? 'YES' : 'NO (BLE Only)'}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View
+        className="mt-4 flex-row items-center rounded-xl p-3.5"
+        style={{ backgroundColor: theme.colors.primarySoft }}>
+        <Ionicons name="information-circle-outline" size={20} color={theme.colors.primary} />
+        <Text
+          className="ml-2.5 flex-1 text-xs font-bold leading-5"
+          style={{ color: theme.colors.text }}>
+          You already have an active attendance record for this schedule today.
+        </Text>
+      </View>
+    </View>
+  );
+}
 
 function DetailRow({
   icon,
@@ -301,9 +406,25 @@ export function StudentScheduleDetail({
   schedule: CourseSchedule;
 }) {
   const theme = useAppTheme();
+  const queryClient = useQueryClient();
   const normalizedStatus = activeSession?.status?.trim().toLowerCase();
   const isSessionActive = activeSession !== null && normalizedStatus === 'active';
   const expectedRoomName = schedule.room ?? 'Not set';
+
+  const scheduleId = Number(schedule.id);
+  const isValidScheduleId = Number.isFinite(scheduleId) && scheduleId > 0;
+
+  const {
+    data: existingRecord = null,
+    isLoading: isCheckingRecord,
+    error: checkRecordError,
+    refetch: refetchCheckRecord,
+  } = useQuery({
+    queryKey: attendanceRecordQueryKeys.check(scheduleId),
+    queryFn: () => checkAttendanceRecord(scheduleId),
+    enabled: isValidScheduleId,
+    staleTime: 0,
+  });
 
   const [isScanning, setIsScanning] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
@@ -349,8 +470,7 @@ export function StudentScheduleDetail({
     faceVerified: boolean;
     faceVerifiedAt: string;
   }) {
-    const scheduleId = Number(schedule.id);
-    if (!scheduleId || Number.isNaN(scheduleId)) {
+    if (!isValidScheduleId) {
       Alert.alert('Error', 'Invalid schedule ID for attendance submission.');
       return;
     }
@@ -370,6 +490,10 @@ export function StudentScheduleDetail({
       });
 
       setSubmittedResult(response.data);
+      void queryClient.invalidateQueries({
+        queryKey: attendanceRecordQueryKeys.check(scheduleId),
+      });
+
       Alert.alert(
         'Attendance Verified!',
         `Your presence has been successfully recorded as PRESENT (${
@@ -419,249 +543,236 @@ export function StudentScheduleDetail({
     }
   }
 
+  const activeRecord = existingRecord ?? submittedResult?.attendanceRecord ?? null;
+
   return (
     <View className="flex-1" style={{ paddingHorizontal: 16 }}>
-      {/* Attendance Submission Success Card */}
-      {submittedResult && (
+      {isCheckingRecord ? (
         <View
-          className="mb-4 rounded-[20px] border p-4"
-          style={{
-            borderColor: theme.colors.success,
-            backgroundColor: theme.colors.primarySoft,
-          }}>
-          <View className="flex-row items-center">
-            <Ionicons name="checkmark-circle" size={28} color={theme.colors.success} />
-            <View className="ml-3 flex-1">
-              <Text className="text-base font-black text-emerald-700 dark:text-emerald-400">
-                Attendance Recorded (PRESENT)
-              </Text>
-              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
-                Record ID #{submittedResult.attendanceRecord.attendance_record_id} • Verified at{' '}
-                {new Date(submittedResult.attendanceRecord.verified_at).toLocaleTimeString()}
-              </Text>
-            </View>
-          </View>
-          <View className="mt-3 gap-1 rounded-lg bg-white/60 dark:bg-black/20 p-2.5">
-            <View className="flex-row justify-between">
-              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
-                Presence Verified:
-              </Text>
-              <Text className="text-xs font-black text-emerald-600 dark:text-emerald-400">YES</Text>
-            </View>
-            <View className="flex-row justify-between">
-              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
-                Face Verified:
-              </Text>
-              <Text className="text-xs font-black" style={{ color: theme.colors.text }}>
-                {submittedResult.attendanceRecord.face_verified ? 'YES' : 'NO (BLE Only)'}
-              </Text>
-            </View>
-            <View className="flex-row justify-between">
-              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
-                Recorded Signal (RSSI):
-              </Text>
-              <Text className="text-xs font-mono font-black" style={{ color: theme.colors.text }}>
-                {submittedResult.bleDetection.rssi} dBm
-              </Text>
-            </View>
-          </View>
-        </View>
-      )}
-
-      {/* Main Connectionless BLE Scanning Card */}
-      <View
-        className="rounded-[20px] p-4"
-        style={{
-          backgroundColor: theme.colors.surface,
-          elevation: 6,
-          shadowColor: '#0F172A',
-          shadowOffset: { width: 0, height: 12 },
-          shadowOpacity: theme.resolvedMode === 'dark' ? 0.3 : 0.18,
-          shadowRadius: 20,
-        }}>
-        <View className="flex-row items-center">
-          <View
-            className="mr-3 h-11 w-11 items-center justify-center rounded-full"
-            style={{ backgroundColor: theme.colors.primarySoft }}>
-            <Ionicons name="radio" size={22} color={theme.colors.primary} />
-          </View>
-          <View className="flex-1">
-            <Text className="text-lg font-black" style={{ color: theme.colors.text }}>
-              ESP32 BLE Advertisements
-            </Text>
-            <Text className="mt-0.5 text-xs font-bold" style={{ color: theme.colors.textMuted }}>
-              Room: {expectedRoomName} • Direct BLE Scan
-            </Text>
-          </View>
-
-          {isSessionActive ? (
-            <View className="rounded-full bg-emerald-500/10 px-3 py-1 border border-emerald-500/30">
-              <Text className="text-xs font-black text-emerald-600 dark:text-emerald-400">
-                Session Active
-              </Text>
-            </View>
-          ) : (
-            <View className="rounded-full bg-slate-500/10 px-3 py-1 border border-slate-500/30">
-              <Text className="text-xs font-black" style={{ color: theme.colors.textMuted }}>
-                Direct Scan
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Scan Action Button */}
-        <Pressable
-          accessibilityRole="button"
-          disabled={isScanning}
-          onPress={handleScanBluetooth}
-          className="mt-4 flex-row items-center justify-center rounded-md border p-3"
-          style={{
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.background,
-          }}>
-          {isScanning ? (
-            <ActivityIndicator color={theme.colors.primary} />
-          ) : (
-            <Ionicons name="refresh-outline" size={20} color={theme.colors.primary} />
-          )}
-          <Text className="ml-2 text-sm font-black" style={{ color: theme.colors.text }}>
-            {isScanning
-              ? 'Scanning PresenSure BLE...'
-              : hasScanned
-              ? 'Rescan Room ESP32 BLE'
-              : 'Scan Room ESP32 BLE Broadcasts'}
+          className="items-center rounded-[20px] border p-6"
+          style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.surface }}>
+          <ActivityIndicator color={theme.colors.primary} />
+          <Text className="mt-3 text-sm font-bold" style={{ color: theme.colors.textMuted }}>
+            Checking attendance record...
           </Text>
-        </Pressable>
-
-        {/* Scan Results / Connectionless Beacon Data List */}
-        <View className="mt-4">
-          {isScanning && beacons.length === 0 ? (
-            <View className="items-center py-8">
-              <ActivityIndicator color={theme.colors.primary} />
-              <Text className="mt-3 text-sm font-bold" style={{ color: theme.colors.textMuted }}>
-                Listening for room ESP32 BLE broadcast signals...
-              </Text>
-            </View>
-          ) : null}
-
-          {!isScanning && hasScanned && beacons.length === 0 ? (
-            <View
-              className="items-center rounded-md border p-5"
-              style={{ borderColor: theme.colors.border }}>
-              <Ionicons name="radio-outline" size={32} color={theme.colors.textMuted} />
-              <Text className="mt-3 text-sm font-black" style={{ color: theme.colors.text }}>
-                No ESP32 BLE Broadcast Found
-              </Text>
-              <Text
-                className="mt-1 text-center text-xs font-bold leading-5"
-                style={{ color: theme.colors.textMuted }}>
-                Make sure you are inside room {expectedRoomName} and the ESP32 beacon is powered on.
-              </Text>
-            </View>
-          ) : null}
-
-          {beacons.length > 0 && (
-            <View className="gap-3">
-              {beacons.map((beacon) => {
-                const selected = selectedBeacon?.id === beacon.id;
-                const borderColor = beacon.isRecommended
-                  ? theme.colors.success
-                  : selected
-                  ? theme.colors.primary
-                  : theme.colors.border;
-
-                return (
-                  <View
-                    key={beacon.id}
-                    className="rounded-xl border p-3.5"
-                    style={{
-                      borderColor,
-                      borderWidth: beacon.isRecommended ? 2 : 1,
-                      backgroundColor:
-                        selected || beacon.isRecommended
-                          ? theme.colors.primarySoft
-                          : theme.colors.background,
-                    }}>
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => setSelectedBeacon(beacon)}
-                      className="flex-row items-center justify-between">
-                      <View className="flex-row items-center flex-1">
-                        <Ionicons
-                          name={selected ? 'radio-button-on' : 'radio-button-off'}
-                          size={20}
-                          color={selected ? theme.colors.primary : theme.colors.textMuted}
-                        />
-                        <View className="ml-2.5 flex-1">
-                          <Text className="text-sm font-black" style={{ color: theme.colors.text }}>
-                            {beacon.name || 'PresenSure Beacon'}
-                          </Text>
-                          <Text
-                            className="mt-0.5 text-xs font-bold"
-                            style={{ color: theme.colors.textMuted }}>
-                            {beacon.rssi !== null
-                              ? `Signal strength: ${beacon.rssi} dBm`
-                              : 'Signal strength unavailable'}
-                          </Text>
-                        </View>
-                      </View>
-                      {beacon.isRecommended && (
-                        <View
-                          className="rounded-full px-2.5 py-1"
-                          style={{ backgroundColor: theme.colors.success }}>
-                          <Text className="text-[10px] font-black uppercase text-white">
-                            Room Match
-                          </Text>
-                        </View>
-                      )}
-                    </Pressable>
-
-                    {/* Advertised Data Section - Connectionless */}
-                    <AdvertisedDataCard beacon={beacon} />
-                  </View>
-                );
-              })}
+        </View>
+      ) : activeRecord ? (
+        <ExistingAttendanceRecordCard record={activeRecord} />
+      ) : (
+        <>
+          {checkRecordError && (
+            <View className="mb-4 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 flex-row items-center justify-between">
+              <View className="flex-row items-center flex-1 mr-2">
+                <Ionicons name="warning-outline" size={18} color="#D97706" />
+                <Text className="ml-2 text-xs font-bold text-amber-800 dark:text-amber-300 flex-1">
+                  Unable to verify existing attendance record status.
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void refetchCheckRecord()}
+                className="rounded-md bg-amber-200 dark:bg-amber-900 px-2.5 py-1">
+                <Text className="text-xs font-black text-amber-900 dark:text-amber-100">Retry</Text>
+              </Pressable>
             </View>
           )}
-        </View>
 
-        {/* Action Button to Submit / Verify Attendance */}
-        {selectedBeacon && (
-          <View className="mt-4">
+          {/* Main Connectionless BLE Scanning Card */}
+          <View
+            className="rounded-[20px] p-4"
+            style={{
+              backgroundColor: theme.colors.surface,
+              elevation: 6,
+              shadowColor: '#0F172A',
+              shadowOffset: { width: 0, height: 12 },
+              shadowOpacity: theme.resolvedMode === 'dark' ? 0.3 : 0.18,
+              shadowRadius: 20,
+            }}>
+            <View className="flex-row items-center">
+              <View
+                className="mr-3 h-11 w-11 items-center justify-center rounded-full"
+                style={{ backgroundColor: theme.colors.primarySoft }}>
+                <Ionicons name="radio" size={22} color={theme.colors.primary} />
+              </View>
+              <View className="flex-1">
+                <Text className="text-lg font-black" style={{ color: theme.colors.text }}>
+                  ESP32 BLE Advertisements
+                </Text>
+                <Text className="mt-0.5 text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+                  Room: {expectedRoomName} • Direct BLE Scan
+                </Text>
+              </View>
+
+              {isSessionActive ? (
+                <View className="rounded-full bg-emerald-500/10 px-3 py-1 border border-emerald-500/30">
+                  <Text className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+                    Session Active
+                  </Text>
+                </View>
+              ) : (
+                <View className="rounded-full bg-slate-500/10 px-3 py-1 border border-slate-500/30">
+                  <Text className="text-xs font-black" style={{ color: theme.colors.textMuted }}>
+                    Direct Scan
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Scan Action Button */}
             <Pressable
               accessibilityRole="button"
-              disabled={isSubmitting}
-              onPress={handleInitiateVerification}
-              className="min-h-[50px] flex-row items-center justify-center rounded-xl"
+              disabled={isScanning}
+              onPress={handleScanBluetooth}
+              className="mt-4 flex-row items-center justify-center rounded-md border p-3"
               style={{
-                backgroundColor: theme.colors.primary,
+                borderColor: theme.colors.border,
+                backgroundColor: theme.colors.background,
               }}>
-              {isSubmitting ? (
-                <ActivityIndicator color="#FFFFFF" />
+              {isScanning ? (
+                <ActivityIndicator color={theme.colors.primary} />
               ) : (
-                <Ionicons name="checkmark-done-circle-outline" size={22} color="#FFFFFF" />
+                <Ionicons name="refresh-outline" size={20} color={theme.colors.primary} />
               )}
-              <Text className="ml-2 text-base font-black text-white">
-                {isSubmitting
-                  ? 'Submitting Attendance...'
-                  : (activeSession?.verification_mode ??
-                      selectedBeacon.parsedEsp32Payload?.verificationMode) === 'face' ||
-                    (activeSession?.verification_mode ??
-                      selectedBeacon.parsedEsp32Payload?.verificationMode) === 'ble_face'
-                  ? 'Proceed to Face Verification'
-                  : 'Verify Attendance via BLE'}
+              <Text className="ml-2 text-sm font-black" style={{ color: theme.colors.text }}>
+                {isScanning
+                  ? 'Scanning PresenSure BLE...'
+                  : hasScanned
+                  ? 'Rescan Room ESP32 BLE'
+                  : 'Scan Room ESP32 BLE Broadcasts'}
               </Text>
             </Pressable>
-          </View>
-        )}
 
-        {scanError && (
-          <View className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 flex-row items-center gap-2">
-            <Ionicons name="alert-circle" size={18} color="#DC2626" />
-            <Text className="flex-1 text-xs font-bold text-red-700">{scanError}</Text>
+            {/* Scan Results / Connectionless Beacon Data List */}
+            <View className="mt-4">
+              {isScanning && beacons.length === 0 ? (
+                <View className="items-center py-8">
+                  <ActivityIndicator color={theme.colors.primary} />
+                  <Text className="mt-3 text-sm font-bold" style={{ color: theme.colors.textMuted }}>
+                    Listening for room ESP32 BLE broadcast signals...
+                  </Text>
+                </View>
+              ) : null}
+
+              {!isScanning && hasScanned && beacons.length === 0 ? (
+                <View
+                  className="items-center rounded-md border p-5"
+                  style={{ borderColor: theme.colors.border }}>
+                  <Ionicons name="radio-outline" size={32} color={theme.colors.textMuted} />
+                  <Text className="mt-3 text-sm font-black" style={{ color: theme.colors.text }}>
+                    No ESP32 BLE Broadcast Found
+                  </Text>
+                  <Text
+                    className="mt-1 text-center text-xs font-bold leading-5"
+                    style={{ color: theme.colors.textMuted }}>
+                    Make sure you are inside room {expectedRoomName} and the ESP32 beacon is powered on.
+                  </Text>
+                </View>
+              ) : null}
+
+              {beacons.length > 0 && (
+                <View className="gap-3">
+                  {beacons.map((beacon) => {
+                    const selected = selectedBeacon?.id === beacon.id;
+                    const borderColor = beacon.isRecommended
+                      ? theme.colors.success
+                      : selected
+                      ? theme.colors.primary
+                      : theme.colors.border;
+
+                    return (
+                      <View
+                        key={beacon.id}
+                        className="rounded-xl border p-3.5"
+                        style={{
+                          borderColor,
+                          borderWidth: beacon.isRecommended ? 2 : 1,
+                          backgroundColor:
+                            selected || beacon.isRecommended
+                              ? theme.colors.primarySoft
+                              : theme.colors.background,
+                        }}>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => setSelectedBeacon(beacon)}
+                          className="flex-row items-center justify-between">
+                          <View className="flex-row items-center flex-1">
+                            <Ionicons
+                              name={selected ? 'radio-button-on' : 'radio-button-off'}
+                              size={20}
+                              color={selected ? theme.colors.primary : theme.colors.textMuted}
+                            />
+                            <View className="ml-2.5 flex-1">
+                              <Text className="text-sm font-black" style={{ color: theme.colors.text }}>
+                                {beacon.name || 'PresenSure Beacon'}
+                              </Text>
+                              <Text
+                                className="mt-0.5 text-xs font-bold"
+                                style={{ color: theme.colors.textMuted }}>
+                                {beacon.rssi !== null
+                                  ? `Signal strength: ${beacon.rssi} dBm`
+                                  : 'Signal strength unavailable'}
+                              </Text>
+                            </View>
+                          </View>
+                          {beacon.isRecommended && (
+                            <View
+                              className="rounded-full px-2.5 py-1"
+                              style={{ backgroundColor: theme.colors.success }}>
+                              <Text className="text-[10px] font-black uppercase text-white">
+                                Room Match
+                              </Text>
+                            </View>
+                          )}
+                        </Pressable>
+
+                        {/* Advertised Data Section - Connectionless */}
+                        <AdvertisedDataCard beacon={beacon} />
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+
+            {/* Action Button to Submit / Verify Attendance */}
+            {selectedBeacon && (
+              <View className="mt-4">
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isSubmitting}
+                  onPress={handleInitiateVerification}
+                  className="min-h-[50px] flex-row items-center justify-center rounded-xl"
+                  style={{
+                    backgroundColor: theme.colors.primary,
+                  }}>
+                  {isSubmitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Ionicons name="checkmark-done-circle-outline" size={22} color="#FFFFFF" />
+                  )}
+                  <Text className="ml-2 text-base font-black text-white">
+                    {isSubmitting
+                      ? 'Submitting Attendance...'
+                      : (activeSession?.verification_mode ??
+                          selectedBeacon.parsedEsp32Payload?.verificationMode) === 'face' ||
+                        (activeSession?.verification_mode ??
+                          selectedBeacon.parsedEsp32Payload?.verificationMode) === 'ble_face'
+                      ? 'Proceed to Face Verification'
+                      : 'Verify Attendance via BLE'}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+
+            {scanError && (
+              <View className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 flex-row items-center gap-2">
+                <Ionicons name="alert-circle" size={18} color="#DC2626" />
+                <Text className="flex-1 text-xs font-bold text-red-700">{scanError}</Text>
+              </View>
+            )}
           </View>
-        )}
-      </View>
+        </>
+      )}
 
       {/* Face Gesture Challenge Modal */}
       <FaceGestureChallengeModal
