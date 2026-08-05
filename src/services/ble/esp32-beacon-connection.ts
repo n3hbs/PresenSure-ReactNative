@@ -348,10 +348,6 @@ export async function connectToEsp32Beacon(deviceId: string) {
     const discoveredDevice = await connectedDevice.discoverAllServicesAndCharacteristics();
     const services = await discoveredDevice.services();
     const discoveredServiceUuids = services.map((service) => service.uuid.toLowerCase());
-    console.log("[PresenSure:ble-services]", {
-      blePeripheralId: deviceId,
-      services: discoveredServiceUuids,
-    });
 
     const presenSureService = services.find(
       (service) => service.uuid.toLowerCase() === PRESENSURE_BLE.serviceUuid,
@@ -368,11 +364,7 @@ export async function connectToEsp32Beacon(deviceId: string) {
     const characteristicUuids = new Set(
       characteristics.map((characteristic) => characteristic.uuid.toLowerCase()),
     );
-    console.log("[PresenSure:ble-characteristics]", {
-      blePeripheralId: deviceId,
-      serviceUuid: presenSureService.uuid,
-      characteristics: [...characteristicUuids],
-    });
+
     const requiredUuids = Object.values(PRESENSURE_BLE.characteristics);
 
     if (requiredUuids.some((uuid) => !characteristicUuids.has(uuid))) {
@@ -496,11 +488,7 @@ async function sendEsp32SessionCommand(
             "ESP32 status",
           );
           statusState.last = status;
-          console.log("[PresenSure:ble-status]", {
-            status: status.status,
-            code: status.code,
-            message: status.message,
-          });
+
 
           if (status.status === "ERROR") {
             waiter?.reject(

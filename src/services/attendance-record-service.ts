@@ -65,3 +65,40 @@ export async function storeAttendanceRecord(
     throw error;
   }
 }
+
+export type CheckAttendanceRecordResponse = {
+  success: boolean;
+  message: string;
+  data: AttendanceRecordData | null;
+};
+
+export async function checkAttendanceRecord(
+  attendanceScheduleId: number
+): Promise<AttendanceRecordData | null> {
+  try {
+    const response = await apiClient.get<CheckAttendanceRecordResponse>(
+      'api/attendance-record/check',
+      {
+        params: {
+          schedule_id: attendanceScheduleId,
+          attendance_schedule_id: attendanceScheduleId,
+        },
+      }
+    );
+
+
+    return response.data.data;
+  } catch (error) {
+    if (isAxiosError(error)) {
+      const message =
+        typeof error.response?.data?.message === 'string'
+          ? error.response.data.message
+          : 'Unable to check attendance record.';
+      logError('attendance-record.check', error);
+      throw new Error(message);
+    }
+
+    throw error;
+  }
+}
+

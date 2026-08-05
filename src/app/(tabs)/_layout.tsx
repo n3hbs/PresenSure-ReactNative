@@ -1,5 +1,5 @@
 import { Redirect, Tabs } from 'expo-router';
-import { CalendarDays, Home, ShieldCheck } from 'lucide-react-native';
+import { CalendarDays, Home, ScanFace, ShieldCheck } from 'lucide-react-native';
 import { ActivityIndicator, View } from 'react-native';
 
 import { useAppTheme } from '@/providers/theme-provider';
@@ -84,11 +84,19 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="face-recognition"
+        options={{
+          title: 'Face Verify',
+          tabBarIcon: ({ color, size }) => (
+            <ScanFace color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="notifications"
         options={{ href: null }}
       />
       <Tabs.Screen name="scanner" options={{ href: null }} />
-      <Tabs.Screen name="face-recognition" options={{ href: null }} />
       <Tabs.Screen name="explore" options={{ href: null }} />
     </Tabs>
   );

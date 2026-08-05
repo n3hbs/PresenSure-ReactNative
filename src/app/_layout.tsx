@@ -1,5 +1,7 @@
 import { Stack, usePathname } from "expo-router";
-import { StatusBar } from "react-native";
+import { LogBox, StatusBar } from "react-native";
+
+LogBox.ignoreAllLogs();
 
 import { AppProviders } from "@/providers/app-providers";
 import { useAppTheme } from "@/providers/theme-provider";

@@ -24,15 +24,9 @@ function describeError(error: unknown) {
  * tokens, signatures, device secrets, face data, or authorization headers.
  */
 export function logError(
-  scope: string,
-  error: unknown,
-  context: LogContext = {},
+  _scope: string,
+  _error: unknown,
+  _context: LogContext = {},
 ) {
-  // Expo CLI forwards console logs to the Metro terminal. Using console.log
-  // here prevents caught diagnostic errors from opening React Native LogBox.
-  console.log(`[PresenSure:error] ${scope}`, {
-    timestamp: new Date().toISOString(),
-    ...describeError(error),
-    context,
-  });
+  // Logs removed
 }
