@@ -19,6 +19,7 @@ import {
 } from '@/services/ble/esp32-beacon-connection';
 import type { AttendanceSession, VerificationMode } from '@/types/attendance-session';
 import type { CourseSchedule } from '@/types/course-schedule';
+import { FaceVerificationModal } from '@/features/attendance/components/face-verification-modal';
 
 function ExistingAttendanceRecordCard({
   record,
@@ -508,17 +509,57 @@ export function StudentScheduleDetail({
     }
   }
 
-  function handleInitiateVerification() {
-    if (!selectedBeacon) {
-      Alert.alert('Selection Required', 'Please select a matched ESP32 device first.');
-      return;
-    }
+  const sessionMode = activeSession?.verification_mode;
+  const parsedMode = selectedBeacon?.parsedEsp32Payload?.verificationMode;
+  const effectiveVerificationMode: VerificationMode = sessionMode || parsedMode || 'ble_face';
 
-    void handleStoreAttendance({
-      beacon: selectedBeacon,
-      faceVerified: false,
-      faceVerifiedAt: new Date().toISOString(),
+  async function handleFaceSuccess(verifiedAtIso: string) {
+    const beaconToUse: DetectedEsp32Beacon = selectedBeacon ?? {
+      id: 'FACE_VERIFIED_DEVICE',
+      beaconId: 'FACE_VERIFIED_DEVICE',
+      name: 'Face Verified',
+      rssi: -50,
+      txPowerLevel: null,
+      serviceUUIDs: [],
+      manufacturerData: null,
+      serviceData: null,
+      decodedManufacturerData: null,
+      advertisedPayload: null,
+      parsedEsp32Payload: null,
+      isRecommended: true,
+    };
+
+    await handleStoreAttendance({
+      beacon: beaconToUse,
+      faceVerified: true,
+      faceVerifiedAt: verifiedAtIso,
     });
+  }
+
+  function handleInitiateVerification(requireFaceOverride?: boolean) {
+    const shouldVerifyFace = requireFaceOverride || effectiveVerificationMode === 'face' || effectiveVerificationMode === 'ble_face';
+
+    if (shouldVerifyFace) {
+      if (effectiveVerificationMode === 'ble_face' && !selectedBeacon) {
+        Alert.alert(
+          'ESP32 Beacon Required',
+          'Please scan and select a room ESP32 beacon signal first before verifying your face identity.'
+        );
+        return;
+      }
+      setFaceModalVisible(true);
+    } else {
+      if (!selectedBeacon) {
+        Alert.alert('Selection Required', 'Please select a matched ESP32 device first.');
+        return;
+      }
+
+      void handleStoreAttendance({
+        beacon: selectedBeacon,
+        faceVerified: false,
+        faceVerifiedAt: new Date().toISOString(),
+      });
+    }
   }
 
   const activeRecord = existingRecord ?? submittedResult?.attendanceRecord ?? null;
@@ -554,6 +595,36 @@ export function StudentScheduleDetail({
               </Pressable>
             </View>
           )}
+
+          {/* Verification Mode Info Banner */}
+          <View
+            className="mb-4 rounded-xl border p-3 flex-row items-center justify-between"
+            style={{
+              borderColor: theme.colors.primary,
+              backgroundColor: theme.colors.primarySoft,
+            }}>
+            <View className="flex-row items-center flex-1 mr-2">
+              <Ionicons name="scan-circle-outline" size={24} color={theme.colors.primary} />
+              <View className="ml-2.5 flex-1">
+                <Text className="text-xs font-black uppercase" style={{ color: theme.colors.primary }}>
+                  Verification Mode
+                </Text>
+                <Text className="text-xs font-bold mt-0.5" style={{ color: theme.colors.text }}>
+                  {effectiveVerificationMode === 'ble_face'
+                    ? 'BLE Presence + Face Recognition'
+                    : effectiveVerificationMode === 'face'
+                    ? 'Face Recognition Only'
+                    : 'BLE Beacon Only'}
+                </Text>
+              </View>
+            </View>
+
+            <View className="rounded-full bg-primary/20 px-2.5 py-1">
+              <Text className="text-[10px] font-black uppercase" style={{ color: theme.colors.primary }}>
+                {effectiveVerificationMode.toUpperCase()}
+              </Text>
+            </View>
+          </View>
 
           {/* Main Connectionless BLE Scanning Card */}
           <View
@@ -712,13 +783,13 @@ export function StudentScheduleDetail({
               )}
             </View>
 
-            {/* Action Button to Submit / Verify Attendance */}
-            {selectedBeacon && (
-              <View className="mt-4">
+            {/* Action Buttons to Submit / Verify Attendance */}
+            <View className="mt-4 gap-2.5">
+              {(effectiveVerificationMode === 'ble_face' || effectiveVerificationMode === 'face') && (
                 <Pressable
                   accessibilityRole="button"
                   disabled={isSubmitting}
-                  onPress={handleInitiateVerification}
+                  onPress={() => handleInitiateVerification(true)}
                   className="min-h-[50px] flex-row items-center justify-center rounded-xl"
                   style={{
                     backgroundColor: theme.colors.primary,
@@ -726,14 +797,55 @@ export function StudentScheduleDetail({
                   {isSubmitting ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <Ionicons name="checkmark-done-circle-outline" size={22} color="#FFFFFF" />
+                    <Ionicons name="camera-outline" size={22} color="#FFFFFF" />
                   )}
                   <Text className="ml-2 text-base font-black text-white">
-                    {isSubmitting ? 'Submitting Attendance...' : 'Verify Attendance via BLE'}
+                    {isSubmitting
+                      ? 'Submitting Attendance...'
+                      : effectiveVerificationMode === 'ble_face'
+                      ? 'Verify Attendance (BLE + Face)'
+                      : 'Verify Attendance via Face Recognition'}
                   </Text>
                 </Pressable>
-              </View>
-            )}
+              )}
+
+              {effectiveVerificationMode === 'ble' && selectedBeacon && (
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={isSubmitting}
+                    onPress={() => handleInitiateVerification(false)}
+                    className="min-h-[50px] flex-row items-center justify-center rounded-xl"
+                    style={{
+                      backgroundColor: theme.colors.primary,
+                    }}>
+                    {isSubmitting ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Ionicons name="checkmark-done-circle-outline" size={22} color="#FFFFFF" />
+                    )}
+                    <Text className="ml-2 text-base font-black text-white">
+                      {isSubmitting ? 'Submitting Attendance...' : 'Verify Attendance via BLE'}
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={isSubmitting}
+                    onPress={() => handleInitiateVerification(true)}
+                    className="min-h-[44px] flex-row items-center justify-center rounded-xl border"
+                    style={{
+                      borderColor: theme.colors.primary,
+                      backgroundColor: theme.colors.primarySoft,
+                    }}>
+                    <Ionicons name="camera-outline" size={18} color={theme.colors.primary} />
+                    <Text className="ml-2 text-sm font-black" style={{ color: theme.colors.primary }}>
+                      Verify with Face Recognition (Optional)
+                    </Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
 
             {scanError && (
               <View className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 flex-row items-center gap-2">
@@ -742,8 +854,19 @@ export function StudentScheduleDetail({
               </View>
             )}
           </View>
+
+          {/* Face Verification Modal Component */}
+          <FaceVerificationModal
+            visible={faceModalVisible}
+            onClose={() => setFaceModalVisible(false)}
+            onSuccess={(verifiedAtIso) => {
+              void handleFaceSuccess(verifiedAtIso);
+            }}
+            scheduleTitle={schedule.course_code ? `${schedule.course_code} - Room ${expectedRoomName}` : undefined}
+          />
         </>
       )}
     </View>
   );
 }
+
