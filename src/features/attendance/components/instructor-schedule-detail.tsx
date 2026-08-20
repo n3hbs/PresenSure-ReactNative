@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,12 +15,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppTheme } from "@/providers/theme-provider";
 import { attendanceSessionQueryKeys } from "@/features/attendance/attendance-session-query-keys";
+import { courseScheduleQueryKeys } from "@/features/attendance/course-schedule-query-keys";
 import { showBluetoothOffAlert } from "@/features/attendance/bluetooth-settings-alert";
 import { Esp32BeaconPickerModal } from "@/features/attendance/components/esp32-beacon-picker-modal";
 import {
   createAttendanceSession,
   getServerTime,
 } from "@/services/attendance-session-service";
+import { getScheduleStudents } from "@/services/course-schedule-service";
 import {
   configureEsp32Attendance,
   connectToEsp32Beacon,
@@ -38,6 +40,7 @@ import {
   formatDateTimeInManila,
   formatDays,
   formatTime,
+
   getManilaClockFromDate,
   isScheduleActive,
   parseTimeToMinutes,
@@ -151,6 +154,27 @@ export function InstructorScheduleDetail({
   );
 
   const scheduleId = useMemo(() => toNumericId(schedule.id), [schedule.id]);
+
+  const { data: studentListData } = useQuery({
+    queryKey: courseScheduleQueryKeys.students(scheduleId ?? 0),
+    queryFn: () => getScheduleStudents(scheduleId!),
+    enabled: scheduleId !== null && scheduleId > 0,
+    staleTime: 1000 * 60 * 2,
+  });
+
+  const studentsWithoutProfileCount =
+    studentListData?.students_without_profile_image_count ?? 0;
+  const hasStudentsWithoutProfile = studentsWithoutProfileCount > 0;
+
+  useEffect(() => {
+    if (
+      hasStudentsWithoutProfile &&
+      (verificationMode === "ble_face" || verificationMode === "face")
+    ) {
+      setVerificationMode("ble");
+    }
+  }, [hasStudentsWithoutProfile, verificationMode]);
+
   const serverClock = useMemo(
     () => getManilaClockFromDate(serverNow),
     [serverNow],
@@ -209,7 +233,8 @@ export function InstructorScheduleDetail({
     canMeetMinimumDuration &&
     esp32Connected &&
     !isSubmitting &&
-    selectedBeaconId !== null;
+    selectedBeaconId !== null &&
+    (!hasStudentsWithoutProfile || verificationMode === "ble");
 
   const disabledReason = !activeNow
     ? "Attendance can start only during the scheduled class time."
@@ -217,11 +242,14 @@ export function InstructorScheduleDetail({
       ? "Remaining schedule time is less than 15 minutes."
       : scheduleId === null
         ? "Schedule ID is unavailable."
-        : selectedBeaconId === null
-          ? "Select the ESP32 beacon detected for this room."
-          : !esp32Connected
-            ? "Connect successfully to the ESP32 BLE beacon before starting attendance."
-            : null;
+        : hasStudentsWithoutProfile && verificationMode !== "ble"
+          ? `${studentsWithoutProfileCount} student(s) lack a profile photo. Please use BLE mode.`
+          : selectedBeaconId === null
+            ? "Select the ESP32 beacon detected for this room."
+            : !esp32Connected
+              ? "Connect successfully to the ESP32 BLE beacon before starting attendance."
+              : null;
+
 
   function adjustDuration(amount: number) {
     if (!canMeetMinimumDuration) return;
@@ -613,6 +641,8 @@ export function InstructorScheduleDetail({
             style={{ backgroundColor: theme.colors.surfaceMuted }}
           >
             {(["ble_face", "ble", "face"] as VerificationMode[]).map((mode) => {
+              const requiresFace = mode === "ble_face" || mode === "face";
+              const isModeDisabled = requiresFace && hasStudentsWithoutProfile;
               const selected = verificationMode === mode;
               const label =
                 mode === "ble_face"
@@ -625,12 +655,22 @@ export function InstructorScheduleDetail({
                 <Pressable
                   key={mode}
                   accessibilityRole="button"
-                  onPress={() => setVerificationMode(mode)}
+                  onPress={() => {
+                    if (isModeDisabled) {
+                      Alert.alert(
+                        "Face Verification Disabled",
+                        `${studentsWithoutProfileCount} student(s) enrolled in this schedule have not registered a profile photo. Attendance can only be started using BLE mode.`
+                      );
+                      return;
+                    }
+                    setVerificationMode(mode);
+                  }}
                   className="min-h-[36px] flex-1 items-center justify-center rounded-full"
                   style={{
                     backgroundColor: selected
                       ? theme.colors.surface
                       : "transparent",
+                    opacity: isModeDisabled ? 0.35 : 1,
                   }}
                 >
                   <Text
@@ -639,6 +679,7 @@ export function InstructorScheduleDetail({
                       color: selected
                         ? theme.colors.text
                         : theme.colors.textMuted,
+                      textDecorationLine: isModeDisabled ? "line-through" : "none",
                     }}
                   >
                     {label}
@@ -647,7 +688,19 @@ export function InstructorScheduleDetail({
               );
             })}
           </View>
+
+          {hasStudentsWithoutProfile && (
+            <View className="mt-2.5 flex-row items-center rounded-xl border border-amber-300 bg-amber-50 p-2.5 dark:border-amber-700/50 dark:bg-amber-950/30">
+              <Ionicons name="warning-outline" size={16} color="#D97706" />
+              <Text className="ml-2 flex-1 text-xs font-bold text-amber-800 dark:text-amber-300">
+                {studentsWithoutProfileCount === 1
+                  ? "1 student has no profile photo. Face verification is disabled (BLE only)."
+                  : `${studentsWithoutProfileCount} students have no profile photo. Face verification is disabled (BLE only).`}
+              </Text>
+            </View>
+          )}
         </View>
+
 
         <View className="mt-4">
           <View className="mb-2 flex-row items-center justify-between">
