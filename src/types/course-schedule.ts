@@ -63,3 +63,100 @@ export type CourseSchedulesResponse =
       message?: string;
       data: ApiCourseScheduleItem[] | CourseSchedule[];
     };
+
+export type ScheduleStudent = {
+  user_id?: string;
+  id?: string | number;
+  student_id?: string | number;
+  first_name?: string;
+  middle_initial?: string | null;
+  last_name?: string;
+  suffix?: string | null;
+  full_name?: string;
+  name?: string;
+  email?: string;
+  student_number?: string;
+  sex?: string;
+
+  // Support nested user object from backend ActiveSemesterStudentListResource
+  user?: {
+    user_id?: string;
+    first_name?: string;
+    middle_initial?: string | null;
+    last_name?: string;
+    suffix?: string | null;
+    sex?: string;
+    email?: string;
+  } | null;
+
+  // Support nested student array/object
+  student?: Array<{
+    student_id?: number | string;
+    year?: string;
+    block?: string;
+    status?: string;
+    program?: {
+      program_id?: number;
+      program_code?: string;
+      program_name?: string;
+      code?: string;
+      name?: string;
+    } | null;
+  }> | {
+    student_id?: number | string;
+    year?: string;
+    block?: string;
+    status?: string;
+    program?: {
+      program_id?: number;
+      program_code?: string;
+      program_name?: string;
+      code?: string;
+      name?: string;
+    } | null;
+  } | null;
+
+  // Support nested profile object
+  profile?: {
+    imagelink?: string | null;
+    image_link?: string | null;
+    avatar?: string | null;
+  } | null;
+
+  role?: {
+    role_id?: number;
+    role_name?: string;
+  } | null;
+
+  program?: string | {
+    program_id?: number;
+    program_code?: string;
+    program_name?: string;
+    code?: string;
+    name?: string;
+    title?: string;
+  } | null;
+  user_profile?: {
+    imagelink?: string | null;
+    image_link?: string | null;
+    avatar?: string | null;
+  } | null;
+  profile_image?: string | null;
+  imagelink?: string | null;
+  avatar?: string | null;
+  image?: string | null;
+};
+
+
+export type ScheduleStudentListData = {
+  students: ScheduleStudent[];
+  student_count: number;
+  students_without_profile_image_count: number;
+};
+
+export type ScheduleStudentListResponse = {
+  success?: boolean;
+  message?: string;
+  data: ScheduleStudentListData;
+};
+
