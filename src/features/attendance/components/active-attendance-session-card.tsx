@@ -19,6 +19,7 @@ import {
   getServerTime,
   stopAttendanceSession,
 } from "@/services/attendance-session-service";
+
 import {
   configureEsp32Attendance,
   connectToEsp32Beacon,
@@ -97,7 +98,9 @@ export function ActiveAttendanceSessionCard({
   const continueSessionMutation = useMutation({
     mutationFn: continueAttendanceSession,
   });
+
   const serverClock = getManilaClockFromDate(serverNow);
+
   const maxDurationMinutes = Math.max(
     0,
     parseTimeToMinutes(schedule.end_time) - serverClock.minutes,
@@ -463,6 +466,7 @@ export function ActiveAttendanceSessionCard({
             Ends: {formatDateTimeInManila(session.end_at)}
           </Text>
         </View>
+
 
         <View
           className="mt-4 w-full flex-row items-center rounded-md border p-3"

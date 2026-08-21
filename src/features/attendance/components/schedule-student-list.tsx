@@ -91,7 +91,7 @@ function getProgramTitle(student: ScheduleStudent): string | null {
     programObj.code ||
     programObj.program_name ||
     programObj.name ||
-    programObj.title ||
+    (programObj as any).title ||
     null
   );
 }

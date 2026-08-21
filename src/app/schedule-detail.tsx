@@ -16,6 +16,7 @@ import { StudentScheduleDetail } from '@/features/attendance/components/student-
 import { getActiveAttendanceSession } from '@/services/attendance-session-service';
 import type { CourseSchedule } from '@/types/course-schedule';
 
+
 function parseSchedule(value: string | string[] | undefined): CourseSchedule | null {
   const rawValue = Array.isArray(value) ? value[0] : value;
   if (!rawValue) return null;
@@ -90,6 +91,7 @@ export default function ScheduleDetailScreen() {
     isManageableSessionStatus(activeSession.status)
       ? activeSession
       : null;
+
 
   if (!schedule) {
     return (

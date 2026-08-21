@@ -20,6 +20,8 @@ import {
 import type { AttendanceSession, VerificationMode } from '@/types/attendance-session';
 import type { CourseSchedule } from '@/types/course-schedule';
 import { FaceVerificationModal } from '@/features/attendance/components/face-verification-modal';
+import { useAttendanceMonitor } from '@/hooks/useAttendanceMonitor';
+
 
 function ExistingAttendanceRecordCard({
   record,
@@ -425,6 +427,13 @@ export function StudentScheduleDetail({
     enabled: isValidScheduleId,
     staleTime: 0,
   });
+
+  // Real-time WebSocket attendance status listener for the student
+  useAttendanceMonitor(activeSession?.attendance_session_id, {
+    scheduleId,
+    enabled: Boolean(activeSession?.attendance_session_id && isValidScheduleId),
+  });
+
 
   const [isScanning, setIsScanning] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);

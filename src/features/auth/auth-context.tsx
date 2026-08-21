@@ -12,6 +12,7 @@ import { login } from '@/services/auth-service';
 import type { AuthSession, AuthUser, LoginCredentials } from '@/types/auth';
 import type { DeviceRegistrationStatus, RegisteredDevice } from '@/types/device-registration';
 import { clearStoredSession, getStoredSession, storeSession } from '@/services/storage/auth-storage';
+import { disconnectEcho } from '@/services/websocket/echo-service';
 import { SessionExpiredModal } from '@/components/session-expired-modal';
 
 type AuthContextValue = {
@@ -78,6 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    disconnectEcho();
     await clearStoredSession();
     await clearDeviceRegistration();
     queryClient.clear();
