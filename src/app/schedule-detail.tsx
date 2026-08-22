@@ -156,7 +156,11 @@ export default function ScheduleDetailScreen() {
       {/* Tab Content */}
       {activeTab === 'students' ? (
         scheduleId !== null ? (
-          <ScheduleStudentList scheduleId={scheduleId} />
+          <ScheduleStudentList
+            scheduleId={scheduleId}
+            sessionId={todaysInstructorSession?.attendance_session_id ?? activeSession?.attendance_session_id}
+            sessionStatus={todaysInstructorSession?.status ?? activeSession?.status}
+          />
         ) : (
           <View className="mx-4 items-center rounded-[20px] border p-6" style={{ borderColor: theme.colors.border }}>
             <Ionicons name="alert-circle-outline" size={38} color={theme.colors.danger} />

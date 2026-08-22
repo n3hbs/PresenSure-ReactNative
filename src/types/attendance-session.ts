@@ -105,6 +105,77 @@ export type AttendanceSessionResponse = {
   };
 };
 
+export type AttendanceRecordSummary = {
+  attendance_record_id: number;
+  attendance_session_id: number;
+  status: 'present' | 'late' | 'absent' | string;
+  presence_verified: boolean;
+  face_verified: boolean;
+  face_verified_at: string | null;
+  verified_at: string;
+  rssi?: number | null;
+};
+
+export type AttendanceSessionStudentProgram = {
+  program_id?: number;
+  program_code?: string;
+  program_name?: string;
+  code?: string;
+  name?: string;
+};
+
+export type AttendanceSessionStudentEntry = {
+  student_id?: string | number;
+  program?: AttendanceSessionStudentProgram | null;
+  [key: string]: any;
+};
+
+export type AttendanceSessionStudentItem = {
+  user: {
+    user_id: string;
+    first_name: string;
+    middle_initial?: string | null;
+    last_name: string;
+    suffix?: string | null;
+    sex?: string | null;
+    email?: string | null;
+  };
+  student?: AttendanceSessionStudentEntry[] | AttendanceSessionStudentEntry | null;
+  role?: {
+    role_id?: number;
+    role_name?: string;
+  } | null;
+  profile?: {
+    imagelink?: string | null;
+    image_link?: string | null;
+    avatar?: string | null;
+  } | null;
+  attendance_status: 'present' | 'late' | 'absent' | 'unmarked' | string;
+  attendance_record?: AttendanceRecordSummary | null;
+};
+
+export type AttendanceSessionSummary = {
+  total_students: number;
+  present_count: number;
+  late_count: number;
+  absent_count: number;
+  unmarked_count: number;
+};
+
+export type AttendanceSessionStudentsData = {
+  session_id: number;
+  schedule_id: number;
+  session_status: 'active' | 'paused' | 'ended' | string;
+  summary: AttendanceSessionSummary;
+  students: AttendanceSessionStudentItem[];
+};
+
+export type AttendanceSessionStudentsResponse = {
+  success: boolean;
+  message: string;
+  data: AttendanceSessionStudentsData;
+};
+
 export type Esp32ConfigurationStatus = {
   status:
     | 'READY'
@@ -119,3 +190,5 @@ export type Esp32ConfigurationStatus = {
   code?: string;
   message?: string;
 };
+
+
