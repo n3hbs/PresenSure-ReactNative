@@ -161,3 +161,69 @@ export async function continueAttendanceSession(
     throw error;
   }
 }
+
+export async function getAttendanceSessionStudents(
+  sessionId: number,
+): Promise<import("@/types/attendance-session").AttendanceSessionStudentsData> {
+  try {
+    const response = await apiClient.get<any>(
+      `api/attendance-session/${encodeURIComponent(sessionId)}/students`,
+    );
+
+    const payload = response.data?.data ?? response.data;
+
+    if (!payload || !Array.isArray(payload.students)) {
+      throw new Error(
+        response.data?.message || "Unable to retrieve session students.",
+      );
+    }
+
+    return payload;
+  } catch (error) {
+    if (isAxiosError(error)) {
+      const message =
+        typeof error.response?.data?.message === "string"
+          ? error.response.data.message
+          : "Unable to retrieve attendance session student list.";
+      throw new Error(message);
+    }
+
+    throw error;
+  }
+}
+
+export async function getActiveAttendanceSessionStudents(
+  scheduleId: number,
+): Promise<import("@/types/attendance-session").AttendanceSessionStudentsData | null> {
+  try {
+    const response = await apiClient.get<any>(
+      "api/attendance-session/active/students",
+      {
+        params: { schedule_id: scheduleId },
+      },
+    );
+
+    const payload = response.data?.data ?? response.data;
+
+    if (!payload || !Array.isArray(payload.students)) {
+      return null;
+    }
+
+    return payload;
+  } catch (error) {
+    if (isAxiosError(error)) {
+      if (error.response?.status === 404) {
+        return null;
+      }
+      const message =
+        typeof error.response?.data?.message === "string"
+          ? error.response.data.message
+          : "Unable to retrieve active session student list.";
+      throw new Error(message);
+    }
+
+    throw error;
+  }
+}
+
+

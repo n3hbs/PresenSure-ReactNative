@@ -16,6 +16,7 @@ import { StudentScheduleDetail } from '@/features/attendance/components/student-
 import { getActiveAttendanceSession } from '@/services/attendance-session-service';
 import type { CourseSchedule } from '@/types/course-schedule';
 
+
 function parseSchedule(value: string | string[] | undefined): CourseSchedule | null {
   const rawValue = Array.isArray(value) ? value[0] : value;
   if (!rawValue) return null;
@@ -91,6 +92,7 @@ export default function ScheduleDetailScreen() {
       ? activeSession
       : null;
 
+
   if (!schedule) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }} edges={['top']}>
@@ -154,7 +156,11 @@ export default function ScheduleDetailScreen() {
       {/* Tab Content */}
       {activeTab === 'students' ? (
         scheduleId !== null ? (
-          <ScheduleStudentList scheduleId={scheduleId} />
+          <ScheduleStudentList
+            scheduleId={scheduleId}
+            sessionId={todaysInstructorSession?.attendance_session_id ?? activeSession?.attendance_session_id}
+            sessionStatus={todaysInstructorSession?.status ?? activeSession?.status}
+          />
         ) : (
           <View className="mx-4 items-center rounded-[20px] border p-6" style={{ borderColor: theme.colors.border }}>
             <Ionicons name="alert-circle-outline" size={38} color={theme.colors.danger} />

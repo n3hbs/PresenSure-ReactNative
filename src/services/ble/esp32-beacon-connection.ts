@@ -123,14 +123,33 @@ function normalizeBeaconText(value?: string | null) {
     .replace(/[^a-z0-9]/g, "");
 }
 
-function isPresenSureEsp32Name(name: string) {
-  const normalized = name.toLowerCase();
-  return normalized.startsWith("presensure-") || normalized.startsWith("prensesure-");
+function isPresenSureEsp32Name(name: string, scheduleRoom?: string | null) {
+  const normalized = name.toLowerCase().trim();
+  const normalizedRoom = scheduleRoom ? normalizeBeaconText(scheduleRoom) : "";
+
+  return (
+    normalized.startsWith("presensure") ||
+    normalized.startsWith("prensesure") ||
+    normalized.includes("presensure") ||
+    normalized.includes("beacon") ||
+    normalized.includes("esp32") ||
+    (normalizedRoom.length > 0 && normalized.includes(normalizedRoom))
+  );
 }
 
 function toDetectedBeacon(device: Device, scheduleRoom?: string | null): DetectedEsp32Beacon | null {
   const name = getDeviceName(device);
-  if (!isPresenSureEsp32Name(name)) return null;
+  const serviceUuids = (device.serviceUUIDs ?? []).map((u) => u.toLowerCase());
+  const targetServiceUuid = PRESENSURE_BLE.serviceUuid.toLowerCase();
+
+  const isNameMatch = isPresenSureEsp32Name(name, scheduleRoom);
+  const isUuidMatch = serviceUuids.includes(targetServiceUuid);
+  const isManufacturerMatch = Boolean(
+    device.manufacturerData && parseEsp32ManufacturerData(device.manufacturerData),
+  );
+
+  // Accept if device name matches PresenSure/ESP32/Room, has matching Service UUID, or valid PresenSure BLE payload
+  if (!isNameMatch && !isUuidMatch && !isManufacturerMatch) return null;
 
   const normalizedBeaconRoom = normalizeBeaconText(name);
   const normalizedScheduleRoom = normalizeBeaconText(scheduleRoom);
@@ -165,7 +184,7 @@ function toDetectedBeacon(device: Device, scheduleRoom?: string | null): Detecte
   return {
     id: device.id,
     beaconId: device.id,
-    name,
+    name: name || "PresenSure ESP32",
     rssi: device.rssi ?? null,
     txPowerLevel: device.txPowerLevel ?? null,
     serviceUUIDs: device.serviceUUIDs ?? null,
@@ -180,6 +199,8 @@ function toDetectedBeacon(device: Device, scheduleRoom?: string | null): Detecte
       normalizedBeaconRoom === normalizedScheduleRoom,
   };
 }
+
+
 
 function formatBleError(error: unknown, fallback: string) {
   if (!(error instanceof BleError)) {
@@ -216,21 +237,24 @@ function formatBleError(error: unknown, fallback: string) {
 }
 
 async function requestBleScanPermissions() {
-  const scan = await requestPresenSurePermission("bluetoothScan");
+  if (Platform.OS === "android") {
+    if (Number(Platform.Version) >= 31) {
+      const scan = await requestPresenSurePermission("bluetoothScan");
+      if (!scan.granted && scan.availability === "available") {
+        throw new Error("Nearby devices (Bluetooth Scan) permission is required to find the ESP32 beacon.");
+      }
 
-  if (!scan.granted && scan.availability === "available") {
-    throw new Error("Bluetooth scan permission is required to find the ESP32 beacon.");
-  }
+      await requestPresenSurePermission("bluetoothConnect");
+    }
 
-  // Android 12+ uses BLUETOOTH_SCAN. Location is only required for BLE scans
-  // on Android 11 and older.
-  if (Platform.OS === "android" && Number(Platform.Version) <= 30) {
+    // Location permission is mandatory on Android for BLE discovery when neverForLocation is false
     const location = await requestPresenSurePermission("fineLocation");
     if (!location.granted && location.availability === "available") {
-      throw new Error("Location permission is required for BLE scanning on this Android version.");
+      throw new Error("Location permission is required for Bluetooth scanning on Android. Please grant Location permission in App Settings.");
     }
   }
 }
+
 
 async function requestBleConnectPermission() {
   const connect = await requestPresenSurePermission("bluetoothConnect");
@@ -303,7 +327,7 @@ export async function scanForEsp32Beacons(scheduleRoom?: string | null) {
       );
     }, SCAN_TIMEOUT_MS);
 
-    manager.startDeviceScan([PRESENSURE_BLE.serviceUuid], null, (scanError, device) => {
+    manager.startDeviceScan(null, null, (scanError, device) => {
       if (settled) return;
 
       if (scanError) {
