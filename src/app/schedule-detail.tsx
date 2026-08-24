@@ -110,48 +110,50 @@ export default function ScheduleDetailScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }} edges={['top']}>
       <ScheduleDetailHeader schedule={schedule} />
 
-      {/* Top Tab Bar: Attendance vs Students */}
-      <View
-        className="mx-4 mb-3.5 flex-row rounded-full p-1 border shadow-sm"
-        style={{ backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border }}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setActiveTab('attendance')}
-          className="flex-1 min-h-[38px] flex-row items-center justify-center rounded-full"
-          style={{
-            backgroundColor: activeTab === 'attendance' ? theme.colors.primary : 'transparent',
-          }}>
-          <Ionicons
-            name="calendar-outline"
-            size={16}
-            color={activeTab === 'attendance' ? '#FFFFFF' : theme.colors.textMuted}
-          />
-          <Text
-            className="ml-2 text-xs font-black"
-            style={{ color: activeTab === 'attendance' ? '#FFFFFF' : theme.colors.textMuted }}>
-            Attendance
-          </Text>
-        </Pressable>
+      {/* Top Tab Bar: Attendance vs Students (Instructor only) */}
+      {managesAttendance && (
+        <View
+          className="mx-4 mb-3.5 flex-row rounded-full p-1 border shadow-sm"
+          style={{ backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border }}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setActiveTab('attendance')}
+            className="flex-1 min-h-[38px] flex-row items-center justify-center rounded-full"
+            style={{
+              backgroundColor: activeTab === 'attendance' ? theme.colors.primary : 'transparent',
+            }}>
+            <Ionicons
+              name="calendar-outline"
+              size={16}
+              color={activeTab === 'attendance' ? '#FFFFFF' : theme.colors.textMuted}
+            />
+            <Text
+              className="ml-2 text-xs font-black"
+              style={{ color: activeTab === 'attendance' ? '#FFFFFF' : theme.colors.textMuted }}>
+              Attendance
+            </Text>
+          </Pressable>
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setActiveTab('students')}
-          className="flex-1 min-h-[38px] flex-row items-center justify-center rounded-full"
-          style={{
-            backgroundColor: activeTab === 'students' ? theme.colors.primary : 'transparent',
-          }}>
-          <Ionicons
-            name="people-outline"
-            size={16}
-            color={activeTab === 'students' ? '#FFFFFF' : theme.colors.textMuted}
-          />
-          <Text
-            className="ml-2 text-xs font-black"
-            style={{ color: activeTab === 'students' ? '#FFFFFF' : theme.colors.textMuted }}>
-            Students
-          </Text>
-        </Pressable>
-      </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setActiveTab('students')}
+            className="flex-1 min-h-[38px] flex-row items-center justify-center rounded-full"
+            style={{
+              backgroundColor: activeTab === 'students' ? theme.colors.primary : 'transparent',
+            }}>
+            <Ionicons
+              name="people-outline"
+              size={16}
+              color={activeTab === 'students' ? '#FFFFFF' : theme.colors.textMuted}
+            />
+            <Text
+              className="ml-2 text-xs font-black"
+              style={{ color: activeTab === 'students' ? '#FFFFFF' : theme.colors.textMuted }}>
+              Students
+            </Text>
+          </Pressable>
+        </View>
+      )}
 
       {/* Tab Content */}
       {activeTab === 'students' ? (
@@ -195,7 +197,7 @@ export default function ScheduleDetailScreen() {
                 Checking for an active attendance session
               </Text>
             </View>
-          ) : activeSessionError ? (
+          ) : activeSessionError && managesAttendance ? (
             <View className="mx-4 items-center rounded-[20px] border p-6" style={{ borderColor: theme.colors.border }}>
               <Ionicons name="cloud-offline-outline" size={38} color={theme.colors.danger} />
               <Text className="mt-3 text-center text-base font-black" style={{ color: theme.colors.text }}>

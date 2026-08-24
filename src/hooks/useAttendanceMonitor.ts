@@ -66,7 +66,6 @@ export function useAttendanceMonitor(
 
   useEffect(() => {
     if (!enabled || !sessionId || !token) {
-      setIsConnected(false);
       return;
     }
 

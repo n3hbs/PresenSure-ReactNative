@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 
 import { showBluetoothOffAlert } from '@/features/attendance/bluetooth-settings-alert';
@@ -19,27 +19,57 @@ import {
 } from '@/services/ble/esp32-beacon-connection';
 import type { AttendanceSession, VerificationMode } from '@/types/attendance-session';
 import type { CourseSchedule } from '@/types/course-schedule';
+import {
+  formatBleDetectionTimestamp,
+  type BleDetectionRecord,
+} from '@/services/ble-detection-service';
+import {
+  getPendingOfflineAttendanceRecords,
+  saveOfflineAttendanceRecord,
+  syncPendingOfflineAttendance,
+  toDisplayableOfflineRecord,
+  type OfflinePendingAttendanceRecord,
+} from '@/services/offline-attendance-service';
+import { usePeriodicBleDetection } from '@/hooks/usePeriodicBleDetection';
+import type { PeriodicDetectionState } from '@/services/ble/periodic-ble-service';
+import { logError } from '@/utils/logger';
 import { FaceVerificationModal } from '@/features/attendance/components/face-verification-modal';
-import { useAttendanceMonitor } from '@/hooks/useAttendanceMonitor';
 
 
 function ExistingAttendanceRecordCard({
   record,
+  session,
+  periodicState,
+  isOfflinePending,
+  onSync,
+  isSyncing,
 }: {
   record: AttendanceRecordData;
+  session?: AttendanceSession | null;
+  periodicState?: PeriodicDetectionState;
+  isOfflinePending?: boolean;
+  onSync?: () => void;
+  isSyncing?: boolean;
 }) {
   const theme = useAppTheme();
-  const statusUpper = record.status?.toUpperCase() ?? 'PRESENT';
+  const isOffline = isOfflinePending || record.attendance_record_id === -1;
+  const statusUpper = isOffline ? 'PENDING SYNC' : (record.status?.toUpperCase() ?? 'PRESENT');
   const verifiedDate = new Date(record.verified_at);
   const formattedTime = Number.isNaN(verifiedDate.getTime())
     ? record.verified_at
     : `${verifiedDate.toLocaleDateString()} at ${verifiedDate.toLocaleTimeString()}`;
 
+  const requiresPeriodic = Boolean(session?.requires_periodic_verification);
+  const isPeriodicRunning = Boolean(periodicState?.isRunning);
+
+  const warningColor = '#D97706';
+  const warningSoftBg = theme.resolvedMode === 'dark' ? '#78350F33' : '#FEF3C7';
+
   return (
     <View
       className="rounded-[20px] border p-5"
       style={{
-        borderColor: theme.colors.success,
+        borderColor: isOffline ? warningColor : theme.colors.success,
         backgroundColor: theme.colors.surface,
         elevation: 6,
         shadowColor: '#0F172A',
@@ -51,25 +81,73 @@ function ExistingAttendanceRecordCard({
         <View className="flex-row items-center flex-1">
           <View
             className="mr-3 h-12 w-12 items-center justify-center rounded-full"
-            style={{ backgroundColor: theme.colors.primarySoft }}>
-            <Ionicons name="checkmark-done-circle" size={28} color={theme.colors.success} />
+            style={{
+              backgroundColor: isOffline ? warningSoftBg : theme.colors.primarySoft,
+            }}>
+            <Ionicons
+              name={isOffline ? 'cloud-offline' : 'checkmark-done-circle'}
+              size={28}
+              color={isOffline ? warningColor : theme.colors.success}
+            />
           </View>
           <View className="flex-1">
             <Text className="text-lg font-black" style={{ color: theme.colors.text }}>
-              Attendance Recorded
+              {isOffline ? 'Recorded Offline' : 'Attendance Recorded'}
             </Text>
             <Text className="mt-0.5 text-xs font-bold" style={{ color: theme.colors.textMuted }}>
-              Record ID #{record.attendance_record_id}
+              {isOffline ? 'Stored locally on this phone' : `Record ID #${record.attendance_record_id}`}
             </Text>
           </View>
         </View>
 
-        <View className="rounded-full bg-emerald-500/10 px-3 py-1 border border-emerald-500/30">
-          <Text className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+        <View
+          className="rounded-full px-3 py-1 border"
+          style={{
+            backgroundColor: isOffline ? warningSoftBg : 'rgba(16, 185, 129, 0.1)',
+            borderColor: isOffline ? warningColor : 'rgba(16, 185, 129, 0.3)',
+          }}>
+          <Text
+            className="text-xs font-black"
+            style={{ color: isOffline ? warningColor : '#059669' }}>
             {statusUpper}
           </Text>
         </View>
       </View>
+
+      {isOffline && (
+        <View
+          className="mt-3.5 rounded-xl border p-3"
+          style={{
+            borderColor: warningColor,
+            backgroundColor: warningSoftBg,
+          }}>
+          <View className="flex-row items-center">
+            <Ionicons name="alert-circle-outline" size={18} color={warningColor} />
+            <Text
+              className="ml-2 flex-1 text-xs font-bold leading-5"
+              style={{ color: theme.colors.text }}>
+              Verified via BLE Beacon and saved locally. It will sync automatically or you can tap Sync below when online.
+            </Text>
+          </View>
+          {onSync && (
+            <Pressable
+              accessibilityRole="button"
+              disabled={isSyncing}
+              onPress={onSync}
+              className="mt-3 flex-row items-center justify-center rounded-lg py-2.5 px-4"
+              style={{ backgroundColor: theme.colors.primary }}>
+              {isSyncing ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="sync-outline" size={16} color="#FFFFFF" />
+                  <Text className="ml-2 text-xs font-black text-white">Sync Attendance with Server</Text>
+                </>
+              )}
+            </Pressable>
+          )}
+        </View>
+      )}
 
       <View
         className="mt-4 rounded-xl border p-4"
@@ -101,14 +179,93 @@ function ExistingAttendanceRecordCard({
 
           <View className="flex-row justify-between">
             <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
-              Face Verified:
+              Face Identity Verified:
             </Text>
-            <Text className="text-xs font-black" style={{ color: theme.colors.text }}>
-              {record.face_verified ? 'YES' : 'NO (BLE Only)'}
+            <Text
+              className="text-xs font-black"
+              style={{
+                color: record.face_verified ? theme.colors.success : theme.colors.textMuted,
+              }}>
+              {record.face_verified ? 'YES' : 'SKIPPED / BLE ONLY'}
             </Text>
           </View>
         </View>
       </View>
+
+      {/* Periodic BLE Detection Monitoring Card */}
+      {requiresPeriodic && (
+        <View
+          className="mt-4 rounded-xl border p-4"
+          style={{
+            borderColor: isPeriodicRunning ? theme.colors.success : theme.colors.border,
+            backgroundColor: theme.colors.background,
+          }}>
+          <View className="flex-row items-center justify-between">
+            <View className="flex-row items-center flex-1">
+              <Ionicons
+                name={isPeriodicRunning ? 'pulse' : 'pause-circle-outline'}
+                size={20}
+                color={isPeriodicRunning ? theme.colors.success : theme.colors.textMuted}
+              />
+              <Text className="ml-2 text-xs font-black uppercase" style={{ color: theme.colors.text }}>
+                Continuous Presence (Every 2 min)
+              </Text>
+            </View>
+            <View
+              className="rounded-full px-2 py-0.5"
+              style={{
+                backgroundColor: isPeriodicRunning ? 'rgba(16, 185, 129, 0.1)' : 'rgba(148, 163, 184, 0.1)',
+              }}>
+              <Text
+                className="text-[10px] font-black"
+                style={{ color: isPeriodicRunning ? '#059669' : theme.colors.textMuted }}>
+                {isPeriodicRunning ? 'MONITORING' : 'IDLE'}
+              </Text>
+            </View>
+          </View>
+
+          <Text className="mt-1.5 text-xs font-bold leading-5" style={{ color: theme.colors.textMuted }}>
+            {isPeriodicRunning
+              ? 'Your phone is periodically verifying your presence in the classroom in the background.'
+              : 'Continuous verification is required for this session.'}
+          </Text>
+
+          {periodicState?.lastPingAt && (
+            <View className="mt-2.5 flex-row justify-between border-t pt-2" style={{ borderColor: theme.colors.border }}>
+              <Text className="text-xs font-bold" style={{ color: theme.colors.textMuted }}>
+                Last Detection Ping:
+              </Text>
+              <Text className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+                {periodicState.lastPingAt} ({periodicState.lastRssi ?? -65} dBm)
+              </Text>
+            </View>
+          )}
+
+          {isPeriodicRunning && (
+            <View
+              className="mt-3 flex-row items-center rounded-lg p-2.5 border"
+              style={{
+                borderColor: theme.resolvedMode === 'dark' ? '#065F46' : '#A7F3D0',
+                backgroundColor: theme.resolvedMode === 'dark' ? '#022C22' : '#F0FDF4',
+              }}>
+              <Ionicons name="notifications-outline" size={16} color={theme.colors.success} />
+              <Text
+                className="ml-2 flex-1 text-[11px] font-bold leading-4"
+                style={{ color: theme.resolvedMode === 'dark' ? '#D1FAE5' : '#065F46' }}>
+                Ongoing background notification is active in your status bar to maintain continuous attendance verification.
+              </Text>
+            </View>
+          )}
+
+          {periodicState?.error && (
+            <View className="mt-2 rounded-lg bg-red-500/10 border border-red-500/30 p-2">
+              <Text className="text-[11px] font-bold text-red-500">
+                {periodicState.error}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
 
       <View
         className="mt-4 flex-row items-center rounded-xl p-3.5"
@@ -117,42 +274,15 @@ function ExistingAttendanceRecordCard({
         <Text
           className="ml-2.5 flex-1 text-xs font-bold leading-5"
           style={{ color: theme.colors.text }}>
-          You already have an active attendance record for this schedule today.
+          {isOffline
+            ? 'Your record is safe on this device and ready to sync.'
+            : 'You already have an active attendance record for this schedule today.'}
         </Text>
       </View>
     </View>
   );
 }
 
-function DetailRow({
-  icon,
-  label,
-  value,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: string;
-}) {
-  const theme = useAppTheme();
-
-  return (
-    <View
-      className="flex-row items-center rounded-md border p-3"
-      style={{ borderColor: theme.colors.border }}>
-      <Ionicons name={icon} size={18} color={theme.colors.primary} />
-      <View className="ml-3 flex-1">
-        <Text
-          className="text-[11px] font-black uppercase"
-          style={{ color: theme.colors.textMuted }}>
-          {label}
-        </Text>
-        <Text className="mt-0.5 text-sm font-black" style={{ color: theme.colors.text }}>
-          {value}
-        </Text>
-      </View>
-    </View>
-  );
-}
 
 function AdvertisedDataCard({ beacon }: { beacon: DetectedEsp32Beacon }) {
   const theme = useAppTheme();
@@ -428,13 +558,6 @@ export function StudentScheduleDetail({
     staleTime: 0,
   });
 
-  // Real-time WebSocket attendance status listener for the student
-  useAttendanceMonitor(activeSession?.attendance_session_id, {
-    scheduleId,
-    enabled: Boolean(activeSession?.attendance_session_id && isValidScheduleId),
-  });
-
-
   const [isScanning, setIsScanning] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
   const [beacons, setBeacons] = useState<DetectedEsp32Beacon[]>([]);
@@ -445,6 +568,51 @@ export function StudentScheduleDetail({
   const [submittedResult, setSubmittedResult] =
     useState<StoreAttendanceRecordResponse['data'] | null>(null);
   const [faceModalVisible, setFaceModalVisible] = useState(false);
+
+  const [offlineRecord, setOfflineRecord] = useState<OfflinePendingAttendanceRecord | null>(null);
+  const [isSyncingOffline, setIsSyncingOffline] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (isValidScheduleId) {
+      getPendingOfflineAttendanceRecords(scheduleId).then((records) => {
+        if (isMounted && records.length > 0) {
+          setOfflineRecord(records[0]);
+        }
+      });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [scheduleId, isValidScheduleId]);
+
+  async function handleSyncOffline() {
+    if (!isValidScheduleId) return;
+    try {
+      setIsSyncingOffline(true);
+      const result = await syncPendingOfflineAttendance(scheduleId);
+      if (result.synced > 0) {
+        setOfflineRecord(null);
+        void queryClient.invalidateQueries({
+          queryKey: attendanceRecordQueryKeys.check(scheduleId),
+        });
+        Alert.alert(
+          'Synchronized!',
+          'Your offline attendance record has been successfully synchronized with the server.'
+        );
+      } else if (result.failed > 0) {
+        Alert.alert(
+          'Sync Failed',
+          result.errors[0] || 'Unable to connect to the server. Please check your internet connection.'
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Sync failed';
+      Alert.alert('Sync Error', msg);
+    } finally {
+      setIsSyncingOffline(false);
+    }
+  }
 
   async function handleScanBluetooth() {
     try {
@@ -487,8 +655,7 @@ export function StudentScheduleDetail({
     try {
       setIsSubmitting(true);
       const nowIso = new Date().toISOString();
-
-      const response = await storeAttendanceRecord({
+      const payload = {
         schedule_id: scheduleId,
         presence_verified: true,
         face_verified: faceVerified,
@@ -496,19 +663,32 @@ export function StudentScheduleDetail({
         verified_at: nowIso,
         rssi: beacon.rssi ?? -70,
         detected_at: nowIso,
-      });
+      };
 
-      setSubmittedResult(response.data);
-      void queryClient.invalidateQueries({
-        queryKey: attendanceRecordQueryKeys.check(scheduleId),
-      });
+      try {
+        const response = await storeAttendanceRecord(payload);
+        setSubmittedResult(response.data);
+        setOfflineRecord(null);
+        void queryClient.invalidateQueries({
+          queryKey: attendanceRecordQueryKeys.check(scheduleId),
+        });
 
-      Alert.alert(
-        'Attendance Verified!',
-        `Your presence has been successfully recorded as PRESENT (${
-          faceVerified ? 'BLE + Face Verified' : 'BLE Verified'
-        }).`
-      );
+        Alert.alert(
+          'Attendance Verified!',
+          `Your presence has been successfully recorded as PRESENT (${
+            faceVerified ? 'BLE + Face Verified' : 'BLE Verified'
+          }).`
+        );
+      } catch (networkError) {
+        // When server is offline or connection fails, save locally in offline queue
+        const savedOffline = await saveOfflineAttendanceRecord(payload);
+        setOfflineRecord(savedOffline);
+
+        Alert.alert(
+          'Attendance Saved Offline!',
+          'Your attendance has been verified via the room BLE beacon and saved locally on this device. It will automatically synchronize when you are online.'
+        );
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to store attendance record.';
@@ -571,7 +751,23 @@ export function StudentScheduleDetail({
     }
   }
 
-  const activeRecord = existingRecord ?? submittedResult?.attendanceRecord ?? null;
+  const activeRecord =
+    existingRecord ??
+    submittedResult?.attendanceRecord ??
+    (offlineRecord ? toDisplayableOfflineRecord(offlineRecord) : null);
+
+  const isPeriodicEnabled =
+    Boolean(activeRecord) &&
+    isSessionActive &&
+    Boolean(activeSession?.requires_periodic_verification) &&
+    isValidScheduleId;
+
+  const periodicState = usePeriodicBleDetection({
+    enabled: isPeriodicEnabled,
+    scheduleId,
+    courseName: schedule.course_name || schedule.course_code,
+    room: schedule.room,
+  });
 
   return (
     <View className="flex-1" style={{ paddingHorizontal: 16 }}>
@@ -585,7 +781,14 @@ export function StudentScheduleDetail({
           </Text>
         </View>
       ) : activeRecord ? (
-        <ExistingAttendanceRecordCard record={activeRecord} />
+        <ExistingAttendanceRecordCard
+          record={activeRecord}
+          session={activeSession}
+          periodicState={periodicState}
+          isOfflinePending={Boolean(!existingRecord && !submittedResult && offlineRecord)}
+          onSync={handleSyncOffline}
+          isSyncing={isSyncingOffline}
+        />
       ) : (
         <>
           {checkRecordError && (
@@ -604,36 +807,6 @@ export function StudentScheduleDetail({
               </Pressable>
             </View>
           )}
-
-          {/* Verification Mode Info Banner */}
-          <View
-            className="mb-4 rounded-xl border p-3 flex-row items-center justify-between"
-            style={{
-              borderColor: theme.colors.primary,
-              backgroundColor: theme.colors.primarySoft,
-            }}>
-            <View className="flex-row items-center flex-1 mr-2">
-              <Ionicons name="scan-circle-outline" size={24} color={theme.colors.primary} />
-              <View className="ml-2.5 flex-1">
-                <Text className="text-xs font-black uppercase" style={{ color: theme.colors.primary }}>
-                  Verification Mode
-                </Text>
-                <Text className="text-xs font-bold mt-0.5" style={{ color: theme.colors.text }}>
-                  {effectiveVerificationMode === 'ble_face'
-                    ? 'BLE Presence + Face Recognition'
-                    : effectiveVerificationMode === 'face'
-                    ? 'Face Recognition Only'
-                    : 'BLE Beacon Only'}
-                </Text>
-              </View>
-            </View>
-
-            <View className="rounded-full bg-primary/20 px-2.5 py-1">
-              <Text className="text-[10px] font-black uppercase" style={{ color: theme.colors.primary }}>
-                {effectiveVerificationMode.toUpperCase()}
-              </Text>
-            </View>
-          </View>
 
           {/* Main Connectionless BLE Scanning Card */}
           <View
@@ -761,7 +934,7 @@ export function StudentScheduleDetail({
                             />
                             <View className="ml-2.5 flex-1">
                               <Text className="text-sm font-black" style={{ color: theme.colors.text }}>
-                                {beacon.name || 'PresenSure Beacon'}
+                                {beacon.name || beacon.id}
                               </Text>
                               <Text
                                 className="mt-0.5 text-xs font-bold"

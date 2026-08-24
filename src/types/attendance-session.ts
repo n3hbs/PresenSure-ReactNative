@@ -28,6 +28,7 @@ export type Esp32StartSessionCommand = {
   token: string;
   expires_at: number;
   verification_mode?: VerificationMode;
+  continuous?: boolean;
 };
 
 export type Esp32StopSessionCommand = {

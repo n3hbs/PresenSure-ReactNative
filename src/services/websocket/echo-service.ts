@@ -28,10 +28,7 @@ function getPusherClass(): any {
 const ResolvedPusher = getPusherClass();
 if (ResolvedPusher) {
   try {
-    ResolvedPusher.logToConsole = true;
-    ResolvedPusher.log = (msg: string) => {
-      console.log('📡 [Pusher JS]', msg);
-    };
+    ResolvedPusher.logToConsole = false;
   } catch {
     // Ignore logger setup failure
   }

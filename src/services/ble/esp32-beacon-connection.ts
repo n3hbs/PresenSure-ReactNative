@@ -27,7 +27,7 @@ import type {
 } from "@/types/attendance-session";
 import { logError } from "@/utils/logger";
 
-const SCAN_TIMEOUT_MS = 8_000;
+const SCAN_TIMEOUT_MS = 3_000;
 const ADAPTER_STATE_TIMEOUT_MS = 5_000;
 const CONNECTION_TIMEOUT_MS = 12_000;
 const CONFIGURATION_ACK_TIMEOUT_MS = 10_000;
@@ -118,23 +118,29 @@ function getDeviceName(device: Device) {
 function normalizeBeaconText(value?: string | null) {
   return (value ?? "")
     .toLowerCase()
-    .replace(/^prensesure[-_\s]*/i, "")
-    .replace(/^presensure[-_\s]*/i, "")
     .replace(/[^a-z0-9]/g, "");
 }
 
-function isPresenSureEsp32Name(name: string, scheduleRoom?: string | null) {
-  const normalized = name.toLowerCase().trim();
-  const normalizedRoom = scheduleRoom ? normalizeBeaconText(scheduleRoom) : "";
+function isRoomMatched(beaconName: string, scheduleRoom?: string | null): boolean {
+  if (!scheduleRoom) return false;
+  const cleanRoom = scheduleRoom.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!cleanRoom) return false;
+
+  const cleanBeacon = beaconName.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const cleanBeaconWithoutPrefix = cleanBeacon.replace(/^(presensure|prensesure|esp32|beacon)/g, "");
 
   return (
-    normalized.startsWith("presensure") ||
-    normalized.startsWith("prensesure") ||
-    normalized.includes("presensure") ||
-    normalized.includes("beacon") ||
-    normalized.includes("esp32") ||
-    (normalizedRoom.length > 0 && normalized.includes(normalizedRoom))
+    cleanBeacon.includes(cleanRoom) ||
+    cleanBeaconWithoutPrefix.includes(cleanRoom) ||
+    cleanBeacon === cleanRoom ||
+    cleanBeaconWithoutPrefix === cleanRoom
   );
+}
+
+function isPresenSureDevice(name: string): boolean {
+  if (!name) return false;
+  const normalized = name.toLowerCase().trim();
+  return normalized.includes("presensure") || normalized.includes("prensesure");
 }
 
 function toDetectedBeacon(device: Device, scheduleRoom?: string | null): DetectedEsp32Beacon | null {
@@ -142,19 +148,19 @@ function toDetectedBeacon(device: Device, scheduleRoom?: string | null): Detecte
   const serviceUuids = (device.serviceUUIDs ?? []).map((u) => u.toLowerCase());
   const targetServiceUuid = PRESENSURE_BLE.serviceUuid.toLowerCase();
 
-  const isNameMatch = isPresenSureEsp32Name(name, scheduleRoom);
-  const isUuidMatch = serviceUuids.includes(targetServiceUuid);
-  const isManufacturerMatch = Boolean(
-    device.manufacturerData && parseEsp32ManufacturerData(device.manufacturerData),
-  );
-
-  // Accept if device name matches PresenSure/ESP32/Room, has matching Service UUID, or valid PresenSure BLE payload
-  if (!isNameMatch && !isUuidMatch && !isManufacturerMatch) return null;
-
-  const normalizedBeaconRoom = normalizeBeaconText(name);
-  const normalizedScheduleRoom = normalizeBeaconText(scheduleRoom);
-
   const manufacturerData = device.manufacturerData ?? null;
+  const parsedEsp32Payload = parseEsp32ManufacturerData(manufacturerData);
+  const isManufacturerMatch = Boolean(parsedEsp32Payload);
+
+  const isUuidMatch = serviceUuids.includes(targetServiceUuid);
+  const isMatch = isRoomMatched(name, scheduleRoom);
+  const isNameMatch = isPresenSureDevice(name);
+
+  // Accept if it has valid 23-byte ESP32 broadcast payload, PresenSure GATT service, matching room, or PresenSure name
+  if (!isManufacturerMatch && !isUuidMatch && !isNameMatch && !isMatch) {
+    return null;
+  }
+
   const decodedManufacturerData = decodeBase64AdvertisementData(manufacturerData);
   const serviceData = device.serviceData ?? null;
 
@@ -179,12 +185,12 @@ function toDetectedBeacon(device: Device, scheduleRoom?: string | null): Detecte
     advertisedPayload = tryParseJsonPayload(decodedManufacturerData);
   }
 
-  const parsedEsp32Payload = parseEsp32ManufacturerData(manufacturerData);
+  const displayName = name || (scheduleRoom ? `PresenSure (${scheduleRoom})` : "PresenSure Beacon");
 
   return {
     id: device.id,
     beaconId: device.id,
-    name: name || "PresenSure ESP32",
+    name: displayName,
     rssi: device.rssi ?? null,
     txPowerLevel: device.txPowerLevel ?? null,
     serviceUUIDs: device.serviceUUIDs ?? null,
@@ -194,9 +200,7 @@ function toDetectedBeacon(device: Device, scheduleRoom?: string | null): Detecte
     decodedServiceData,
     advertisedPayload,
     parsedEsp32Payload,
-    isRecommended:
-      normalizedScheduleRoom.length > 0 &&
-      normalizedBeaconRoom === normalizedScheduleRoom,
+    isRecommended: isMatch || isManufacturerMatch,
   };
 }
 
@@ -344,7 +348,45 @@ export async function scanForEsp32Beacons(scheduleRoom?: string | null) {
       if (!device) return;
 
       const beacon = toDetectedBeacon(device, scheduleRoom);
-      if (beacon) beacons.set(beacon.id, beacon);
+      if (beacon) {
+        // Deduplicate: merge if beacon with same name or same session hash already exists
+        const existingKey = [...beacons.keys()].find((key) => {
+          const existing = beacons.get(key);
+          if (!existing) return false;
+          if (existing.id === beacon.id) return true;
+          if (
+            existing.parsedEsp32Payload?.sessionHash &&
+            beacon.parsedEsp32Payload?.sessionHash &&
+            existing.parsedEsp32Payload.sessionHash === beacon.parsedEsp32Payload.sessionHash
+          ) {
+            return true;
+          }
+          if (
+            existing.name &&
+            beacon.name &&
+            existing.name.toLowerCase().trim() === beacon.name.toLowerCase().trim()
+          ) {
+            return true;
+          }
+          return false;
+        });
+
+        if (existingKey) {
+          const existing = beacons.get(existingKey)!;
+          beacons.set(existingKey, {
+            ...existing,
+            ...beacon,
+            id: existing.id,
+            beaconId: existing.beaconId,
+            name: (beacon.name && beacon.name !== "PresenSure Beacon") ? beacon.name : existing.name,
+            rssi: Math.max(existing.rssi ?? -999, beacon.rssi ?? -999),
+            parsedEsp32Payload: beacon.parsedEsp32Payload ?? existing.parsedEsp32Payload,
+            isRecommended: existing.isRecommended || beacon.isRecommended,
+          });
+        } else {
+          beacons.set(beacon.id, beacon);
+        }
+      }
     });
   });
 }

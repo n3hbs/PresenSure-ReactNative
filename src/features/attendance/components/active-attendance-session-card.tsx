@@ -213,7 +213,7 @@ export function ActiveAttendanceSessionCard({
       );
       setIsConnected(true);
       setConnectionLabel(
-        device.localName ?? device.name ?? "PresenSure ESP32",
+        device.localName ?? device.name ?? device.id,
       );
     } catch (connectError) {
       logError("attendance.stop.ble.connect", connectError, {
@@ -280,6 +280,8 @@ export function ActiveAttendanceSessionCard({
         room_code: roomCode,
         token: response.data.ble_token,
         expires_at: expiresAt,
+        verification_mode: continuedSession.verification_mode,
+        continuous: Boolean(continuedSession.requires_periodic_verification),
       });
 
       setHasContinued(true);
