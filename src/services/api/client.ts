@@ -24,8 +24,11 @@ function getValidationErrors(data: unknown) {
   return Object.keys(messages).length > 0 ? JSON.stringify(messages) : undefined;
 }
 
+const rawBaseUrl = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.12:8000';
+const normalizedBaseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : `${rawBaseUrl}/`;
+
 export const apiClient = create({
-  baseURL: process.env.EXPO_PUBLIC_API_URL,
+  baseURL: normalizedBaseUrl,
   headers: {
     Accept: 'application/json',
     'Content-Type': 'application/json',

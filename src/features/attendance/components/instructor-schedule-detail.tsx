@@ -171,7 +171,10 @@ export function InstructorScheduleDetail({
       hasStudentsWithoutProfile &&
       (verificationMode === "ble_face" || verificationMode === "face")
     ) {
-      setVerificationMode("ble");
+      const timer = setTimeout(() => {
+        setVerificationMode("ble");
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [hasStudentsWithoutProfile, verificationMode]);
 
@@ -351,7 +354,7 @@ export function InstructorScheduleDetail({
       setEsp32Connected(true);
       setSelectedBeacon({ ...beacon, beaconId: device.id });
       setEsp32ConnectionLabel(
-        device.localName ?? device.name ?? "PresenSure ESP32",
+        device.localName ?? device.name ?? device.id,
       );
     } catch (connectError) {
       logError("attendance.ble.connect", connectError, {
@@ -448,6 +451,7 @@ export function InstructorScheduleDetail({
         token: response.data.ble_token,
         expires_at: expiresAt,
         verification_mode: verificationMode,
+        continuous: requiresPeriodicVerification,
       };
 
       disconnectionSubscriptionRef.current?.remove();
