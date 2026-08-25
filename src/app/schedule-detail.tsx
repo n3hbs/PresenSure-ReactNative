@@ -80,7 +80,7 @@ export default function ScheduleDetailScreen() {
   } = useQuery({
     queryKey: attendanceSessionQueryKeys.active(scheduleId ?? 0),
     queryFn: () => getActiveAttendanceSession(scheduleId!),
-    enabled: scheduleId !== null,
+    enabled: scheduleId !== null && managesAttendance,
     refetchOnMount: 'always',
     staleTime: 0,
   });

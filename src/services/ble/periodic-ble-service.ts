@@ -6,7 +6,10 @@ import {
   recordBleDetection,
   type BleDetectionRecord,
 } from '@/services/ble-detection-service';
-import { scanForEsp32Beacons } from '@/services/ble/esp32-beacon-connection';
+import {
+  scanForEsp32Beacons,
+  type DetectedEsp32Beacon,
+} from '@/services/ble/esp32-beacon-connection';
 import { logError } from '@/utils/logger';
 
 export type PeriodicDetectionState = {
@@ -29,6 +32,7 @@ export type StartPeriodicDetectionOptions = {
 
 const DEFAULT_INTERVAL_MS = 120_000; // 2 minutes
 const SLEEP_CHUNK_MS = 1_000;
+const MAX_CONSECUTIVE_FAILURES = 3;
 
 let currentState: PeriodicDetectionState = {
   isRunning: false,
@@ -70,24 +74,48 @@ export function getPeriodicDetectionState(): PeriodicDetectionState {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function runPeriodicBleHeartbeat(scheduleId: number, room?: string | null) {
-  let detectedRssi = -65;
-
-  try {
-    const beacons = await scanForEsp32Beacons(room);
-    if (beacons.length > 0) {
-      const match = beacons.find((b) => b.isRecommended) ?? beacons[0];
-      if (match.rssi !== null && match.rssi !== undefined) {
-        detectedRssi = match.rssi;
-      }
+function isBeaconSessionActive(beacon: DetectedEsp32Beacon): boolean {
+  if (!beacon.parsedEsp32Payload && !beacon.advertisedPayload) {
+    return false;
+  }
+  if (beacon.parsedEsp32Payload) {
+    const { sessionHash, verificationToken } = beacon.parsedEsp32Payload;
+    if (!sessionHash || sessionHash === '00000000' || sessionHash === '0000') {
+      return false;
     }
-  } catch {
-    // If scan has transient issue, proceed with fallback RSSI or previous RSSI
-    if (currentState.lastRssi !== null) {
-      detectedRssi = currentState.lastRssi;
+    if (verificationToken === '000000000000') {
+      return false;
     }
   }
+  return true;
+}
 
+async function runPeriodicBleHeartbeat(scheduleId: number, room?: string | null) {
+  let beacons: DetectedEsp32Beacon[];
+  try {
+    beacons = await scanForEsp32Beacons(room);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Bluetooth scan failed';
+    updateState({ error: errorMsg });
+    throw error;
+  }
+
+  if (!beacons || beacons.length === 0) {
+    const errorMsg = 'Room ESP32 beacon not in range';
+    updateState({ error: errorMsg });
+    throw new Error(errorMsg);
+  }
+
+  const match = beacons.find((b) => b.isRecommended) ?? beacons[0];
+
+  // If the detected ESP32 beacon broadcasts empty/cleared session data, session is finished
+  if (!isBeaconSessionActive(match)) {
+    const errorMsg = 'Attendance session ended on ESP32 beacon';
+    updateState({ error: errorMsg });
+    throw new Error(errorMsg);
+  }
+
+  const detectedRssi = match.rssi ?? -65;
   const detectedAt = formatBleDetectionTimestamp(new Date());
 
   const response = await recordBleDetection({
@@ -137,7 +165,9 @@ const backgroundTask = async (taskDataArguments?: {
     return;
   }
 
-  // Continuous loop: waits the full 2-minute interval before triggering the first and subsequent detections
+  let consecutiveFailures = 0;
+
+  // Continuous loop: waits the interval before triggering detections
   while (BackgroundService.isRunning()) {
     const totalChunks = Math.floor(intervalMs / SLEEP_CHUNK_MS);
 
@@ -154,18 +184,23 @@ const backgroundTask = async (taskDataArguments?: {
 
     try {
       await runPeriodicBleHeartbeat(scheduleId, room);
+      consecutiveFailures = 0;
     } catch (err: any) {
+      consecutiveFailures++;
       const errorMsg = err?.message || 'Periodic verification ping failed';
-      logError('ble.periodic.heartbeat', err, { scheduleId });
+      logError('ble.periodic.heartbeat', err, { scheduleId, consecutiveFailures });
       updateState({ error: errorMsg });
 
-      // If backend returns session ended / not active / not enabled, terminate background service
-      if (
+      // Stop service if:
+      // 1. Explicit backend response indicates the attendance session is closed / disabled / record missing
+      // 2. Beacon is unreachable or session ended on ESP32 for 3 consecutive cycles (6 minutes)
+      const isBackendEnded =
         typeof errorMsg === 'string' &&
         (errorMsg.includes('No active attendance session') ||
           errorMsg.includes('not enabled') ||
-          errorMsg.includes('No attendance record'))
-      ) {
+          errorMsg.includes('No attendance record'));
+
+      if (isBackendEnded || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         await stopPeriodicBleService();
         break;
       }
