@@ -3,6 +3,7 @@ import {
   BleError,
   BleErrorCode,
   BleManager,
+  ScanMode,
   State,
   type Device,
   type Subscription,
@@ -27,7 +28,7 @@ import type {
 } from "@/types/attendance-session";
 import { logError } from "@/utils/logger";
 
-const SCAN_TIMEOUT_MS = 3_000;
+const SCAN_TIMEOUT_MS = 6_000;
 const ADAPTER_STATE_TIMEOUT_MS = 5_000;
 const CONNECTION_TIMEOUT_MS = 12_000;
 const CONFIGURATION_ACK_TIMEOUT_MS = 10_000;
@@ -148,18 +149,18 @@ function toDetectedBeacon(device: Device, scheduleRoom?: string | null): Detecte
   const serviceUuids = (device.serviceUUIDs ?? []).map((u) => u.toLowerCase());
   const targetServiceUuid = PRESENSURE_BLE.serviceUuid.toLowerCase();
 
-  const manufacturerData = device.manufacturerData ?? null;
-  const parsedEsp32Payload = parseEsp32ManufacturerData(manufacturerData);
-  const isManufacturerMatch = Boolean(parsedEsp32Payload);
-
   const isUuidMatch = serviceUuids.includes(targetServiceUuid);
-  const isMatch = isRoomMatched(name, scheduleRoom);
   const isNameMatch = isPresenSureDevice(name);
 
-  // Accept if it has valid 23-byte ESP32 broadcast payload, PresenSure GATT service, matching room, or PresenSure name
-  if (!isManufacturerMatch && !isUuidMatch && !isNameMatch && !isMatch) {
+  // Strict check: A beacon MUST have a PresenSure name or explicitly advertise the PresenSure Service UUID.
+  // Never accept random nearby Bluetooth devices (smartwatches, TVs, etc.) as PresenSure beacons.
+  if (!isNameMatch && !isUuidMatch) {
     return null;
   }
+
+  const manufacturerData = device.manufacturerData ?? null;
+  const parsedEsp32Payload = parseEsp32ManufacturerData(manufacturerData);
+  const isMatch = isRoomMatched(name, scheduleRoom);
 
   const decodedManufacturerData = decodeBase64AdvertisementData(manufacturerData);
   const serviceData = device.serviceData ?? null;
@@ -185,7 +186,7 @@ function toDetectedBeacon(device: Device, scheduleRoom?: string | null): Detecte
     advertisedPayload = tryParseJsonPayload(decodedManufacturerData);
   }
 
-  const displayName = name || (scheduleRoom ? `PresenSure (${scheduleRoom})` : "PresenSure Beacon");
+  const displayName = name || "PresenSure Beacon";
 
   return {
     id: device.id,
@@ -200,7 +201,7 @@ function toDetectedBeacon(device: Device, scheduleRoom?: string | null): Detecte
     decodedServiceData,
     advertisedPayload,
     parsedEsp32Payload,
-    isRecommended: isMatch || isManufacturerMatch,
+    isRecommended: isMatch || (isNameMatch && !scheduleRoom),
   };
 }
 
@@ -331,7 +332,7 @@ export async function scanForEsp32Beacons(scheduleRoom?: string | null) {
       );
     }, SCAN_TIMEOUT_MS);
 
-    manager.startDeviceScan(null, null, (scanError, device) => {
+    manager.startDeviceScan(null, { scanMode: ScanMode.LowLatency }, (scanError, device) => {
       if (settled) return;
 
       if (scanError) {

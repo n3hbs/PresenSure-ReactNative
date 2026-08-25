@@ -284,10 +284,39 @@ function ExistingAttendanceRecordCard({
 }
 
 
+export function isBeaconReadyForAttendance(beacon: DetectedEsp32Beacon | null | undefined): boolean {
+  if (!beacon) return false;
+
+  // 1. Check parsed 23-byte ESP32 broadcast payload
+  if (beacon.parsedEsp32Payload) {
+    const { sessionHash, verificationToken } = beacon.parsedEsp32Payload;
+    if (
+      sessionHash &&
+      sessionHash !== '00000000' &&
+      sessionHash !== '0000' &&
+      verificationToken &&
+      verificationToken !== '000000000000'
+    ) {
+      return true;
+    }
+  }
+
+  // 2. Check JSON / custom advertised payload
+  if (beacon.advertisedPayload && typeof beacon.advertisedPayload === 'object') {
+    const payload = beacon.advertisedPayload as Record<string, any>;
+    if (payload.session_id || payload.token || payload.sessionHash || payload.schedule_id) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function AdvertisedDataCard({ beacon }: { beacon: DetectedEsp32Beacon }) {
   const theme = useAppTheme();
   const [showRawDetails, setShowRawDetails] = useState(false);
   const parsed = beacon.parsedEsp32Payload;
+  const isReady = isBeaconReadyForAttendance(beacon);
 
   return (
     <View
@@ -305,12 +334,28 @@ function AdvertisedDataCard({ beacon }: { beacon: DetectedEsp32Beacon }) {
             Advertised ESP32 BLE Data
           </Text>
         </View>
-        <View className="rounded-full bg-emerald-500/10 px-2 py-0.5 border border-emerald-500/30">
-          <Text className="text-[10px] font-black text-emerald-600 dark:text-emerald-400">
-            No API Connection Needed
+        <View
+          className="rounded-full px-2 py-0.5 border"
+          style={{
+            borderColor: isReady ? 'rgba(16, 185, 129, 0.3)' : 'rgba(217, 119, 6, 0.3)',
+            backgroundColor: isReady ? 'rgba(16, 185, 129, 0.1)' : 'rgba(217, 119, 6, 0.1)',
+          }}>
+          <Text
+            className="text-[10px] font-black uppercase"
+            style={{ color: isReady ? '#059669' : '#D97706' }}>
+            {isReady ? 'Session Active' : 'No Active Session'}
           </Text>
         </View>
       </View>
+
+      {!isReady && (
+        <View className="mt-2.5 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 flex-row items-center">
+          <Ionicons name="information-circle-outline" size={18} color="#D97706" />
+          <Text className="ml-2 text-xs font-bold text-amber-800 dark:text-amber-300 flex-1">
+            No active session data broadcast. Wait for the instructor to start the session on this ESP32 beacon.
+          </Text>
+        </View>
+      )}
 
       {/* Parsed 23-byte ESP32 Payload Card */}
       {parsed && (
@@ -586,6 +631,10 @@ export function StudentScheduleDetail({
     };
   }, [scheduleId, isValidScheduleId]);
 
+  useEffect(() => {
+    void handleScanBluetooth();
+  }, []);
+
   async function handleSyncOffline() {
     if (!isValidScheduleId) return;
     try {
@@ -631,7 +680,6 @@ export function StudentScheduleDetail({
         const message =
           error instanceof Error ? error.message : 'Failed to scan for Bluetooth signals.';
         setScanError(message);
-        Alert.alert('Scan Failed', message);
       }
     } finally {
       setIsScanning(false);
@@ -700,7 +748,7 @@ export function StudentScheduleDetail({
 
   const sessionMode = activeSession?.verification_mode;
   const parsedMode = selectedBeacon?.parsedEsp32Payload?.verificationMode;
-  const effectiveVerificationMode: VerificationMode = sessionMode || parsedMode || 'ble_face';
+  const effectiveVerificationMode: VerificationMode = parsedMode || sessionMode || 'ble_face';
 
   async function handleFaceSuccess(verifiedAtIso: string) {
     const beaconToUse: DetectedEsp32Beacon = selectedBeacon ?? {
@@ -726,23 +774,30 @@ export function StudentScheduleDetail({
   }
 
   function handleInitiateVerification(requireFaceOverride?: boolean) {
-    const shouldVerifyFace = requireFaceOverride || effectiveVerificationMode === 'face' || effectiveVerificationMode === 'ble_face';
+    if (!selectedBeacon) {
+      Alert.alert(
+        'ESP32 Beacon Required',
+        'Please scan and select a room ESP32 beacon first before proceeding.'
+      );
+      return;
+    }
+
+    if (!isBeaconReadyForAttendance(selectedBeacon)) {
+      Alert.alert(
+        'No Active Attendance Session',
+        'The selected ESP32 beacon is powered on, but it does not have active attendance session data from the instructor yet. Please wait for the instructor to start the session, then scan again.'
+      );
+      return;
+    }
+
+    const shouldVerifyFace =
+      requireFaceOverride ||
+      effectiveVerificationMode === 'face' ||
+      effectiveVerificationMode === 'ble_face';
 
     if (shouldVerifyFace) {
-      if (effectiveVerificationMode === 'ble_face' && !selectedBeacon) {
-        Alert.alert(
-          'ESP32 Beacon Required',
-          'Please scan and select a room ESP32 beacon signal first before verifying your face identity.'
-        );
-        return;
-      }
       setFaceModalVisible(true);
     } else {
-      if (!selectedBeacon) {
-        Alert.alert('Selection Required', 'Please select a matched ESP32 device first.');
-        return;
-      }
-
       void handleStoreAttendance({
         beacon: selectedBeacon,
         faceVerified: false,
@@ -758,8 +813,8 @@ export function StudentScheduleDetail({
 
   const isPeriodicEnabled =
     Boolean(activeRecord) &&
-    isSessionActive &&
-    Boolean(activeSession?.requires_periodic_verification) &&
+    (Boolean(activeSession?.requires_periodic_verification) ||
+      Boolean(selectedBeacon?.parsedEsp32Payload?.continuousChecking)) &&
     isValidScheduleId;
 
   const periodicState = usePeriodicBleDetection({
@@ -768,6 +823,8 @@ export function StudentScheduleDetail({
     courseName: schedule.course_name || schedule.course_code,
     room: schedule.room,
   });
+
+  const isSelectedReady = isBeaconReadyForAttendance(selectedBeacon);
 
   return (
     <View className="flex-1" style={{ paddingHorizontal: 16 }}>
@@ -904,6 +961,7 @@ export function StudentScheduleDetail({
                 <View className="gap-3">
                   {beacons.map((beacon) => {
                     const selected = selectedBeacon?.id === beacon.id;
+                    const ready = isBeaconReadyForAttendance(beacon);
                     const borderColor = beacon.isRecommended
                       ? theme.colors.success
                       : selected
@@ -945,15 +1003,30 @@ export function StudentScheduleDetail({
                               </Text>
                             </View>
                           </View>
-                          {beacon.isRecommended && (
-                            <View
-                              className="rounded-full px-2.5 py-1"
-                              style={{ backgroundColor: theme.colors.success }}>
-                              <Text className="text-[10px] font-black uppercase text-white">
-                                Room Match
-                              </Text>
-                            </View>
-                          )}
+                          <View className="flex-row items-center gap-1.5">
+                            {ready ? (
+                              <View className="rounded-full px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30">
+                                <Text className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400">
+                                  Session Active
+                                </Text>
+                              </View>
+                            ) : (
+                              <View className="rounded-full px-2 py-0.5 bg-amber-500/10 border border-amber-500/30">
+                                <Text className="text-[10px] font-black uppercase text-amber-600 dark:text-amber-400">
+                                  No Session
+                                </Text>
+                              </View>
+                            )}
+                            {beacon.isRecommended && (
+                              <View
+                                className="rounded-full px-2.5 py-1"
+                                style={{ backgroundColor: theme.colors.success }}>
+                                <Text className="text-[10px] font-black uppercase text-white">
+                                  Room Match
+                                </Text>
+                              </View>
+                            )}
+                          </View>
                         </Pressable>
 
                         {/* Advertised Data Section - Connectionless */}
@@ -970,20 +1043,36 @@ export function StudentScheduleDetail({
               {(effectiveVerificationMode === 'ble_face' || effectiveVerificationMode === 'face') && (
                 <Pressable
                   accessibilityRole="button"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !selectedBeacon || !isSelectedReady}
                   onPress={() => handleInitiateVerification(true)}
                   className="min-h-[50px] flex-row items-center justify-center rounded-xl"
                   style={{
-                    backgroundColor: theme.colors.primary,
+                    backgroundColor:
+                      selectedBeacon && isSelectedReady
+                        ? theme.colors.primary
+                        : theme.colors.surfaceMuted,
+                    opacity: selectedBeacon && isSelectedReady ? 1 : 0.6,
                   }}>
                   {isSubmitting ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <Ionicons name="camera-outline" size={22} color="#FFFFFF" />
+                    <Ionicons
+                      name="camera-outline"
+                      size={22}
+                      color={selectedBeacon && isSelectedReady ? '#FFFFFF' : theme.colors.textMuted}
+                    />
                   )}
-                  <Text className="ml-2 text-base font-black text-white">
+                  <Text
+                    className="ml-2 text-base font-black"
+                    style={{
+                      color: selectedBeacon && isSelectedReady ? '#FFFFFF' : theme.colors.textMuted,
+                    }}>
                     {isSubmitting
                       ? 'Submitting Attendance...'
+                      : !selectedBeacon
+                      ? 'Select Room ESP32 Beacon'
+                      : !isSelectedReady
+                      ? 'Waiting for Session Broadcast...'
                       : effectiveVerificationMode === 'ble_face'
                       ? 'Verify Attendance (BLE + Face)'
                       : 'Verify Attendance via Face Recognition'}
@@ -995,36 +1084,51 @@ export function StudentScheduleDetail({
                 <>
                   <Pressable
                     accessibilityRole="button"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || !isSelectedReady}
                     onPress={() => handleInitiateVerification(false)}
                     className="min-h-[50px] flex-row items-center justify-center rounded-xl"
                     style={{
-                      backgroundColor: theme.colors.primary,
+                      backgroundColor: isSelectedReady
+                        ? theme.colors.primary
+                        : theme.colors.surfaceMuted,
+                      opacity: isSelectedReady ? 1 : 0.6,
                     }}>
                     {isSubmitting ? (
                       <ActivityIndicator color="#FFFFFF" />
                     ) : (
-                      <Ionicons name="checkmark-done-circle-outline" size={22} color="#FFFFFF" />
+                      <Ionicons
+                        name="checkmark-done-circle-outline"
+                        size={22}
+                        color={isSelectedReady ? '#FFFFFF' : theme.colors.textMuted}
+                      />
                     )}
-                    <Text className="ml-2 text-base font-black text-white">
-                      {isSubmitting ? 'Submitting Attendance...' : 'Verify Attendance via BLE'}
+                    <Text
+                      className="ml-2 text-base font-black"
+                      style={{ color: isSelectedReady ? '#FFFFFF' : theme.colors.textMuted }}>
+                      {isSubmitting
+                        ? 'Submitting Attendance...'
+                        : !isSelectedReady
+                        ? 'Waiting for Session Broadcast...'
+                        : 'Verify Attendance via BLE'}
                     </Text>
                   </Pressable>
 
-                  <Pressable
-                    accessibilityRole="button"
-                    disabled={isSubmitting}
-                    onPress={() => handleInitiateVerification(true)}
-                    className="min-h-[44px] flex-row items-center justify-center rounded-xl border"
-                    style={{
-                      borderColor: theme.colors.primary,
-                      backgroundColor: theme.colors.primarySoft,
-                    }}>
-                    <Ionicons name="camera-outline" size={18} color={theme.colors.primary} />
-                    <Text className="ml-2 text-sm font-black" style={{ color: theme.colors.primary }}>
-                      Verify with Face Recognition (Optional)
-                    </Text>
-                  </Pressable>
+                  {isSelectedReady && (
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={isSubmitting}
+                      onPress={() => handleInitiateVerification(true)}
+                      className="min-h-[44px] flex-row items-center justify-center rounded-xl border"
+                      style={{
+                        borderColor: theme.colors.primary,
+                        backgroundColor: theme.colors.primarySoft,
+                      }}>
+                      <Ionicons name="camera-outline" size={18} color={theme.colors.primary} />
+                      <Text className="ml-2 text-sm font-black" style={{ color: theme.colors.primary }}>
+                        Verify with Face Recognition (Optional)
+                      </Text>
+                    </Pressable>
+                  )}
                 </>
               )}
             </View>
